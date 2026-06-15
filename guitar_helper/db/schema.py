@@ -1,7 +1,6 @@
 import sqlite3
 from datetime import datetime, timezone
 
-
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version     INTEGER PRIMARY KEY,
@@ -42,8 +41,8 @@ _CURRENT_VERSION = 1
 _DEFAULT_PRESETS = [
     ("clean",   "Clean",   0),
     ("crunch",  "Crunch",  1),
-    ("metal",   "Metal",   3),
-    ("ambient", "Ambient", 4),
+    ("metal",   "Metal",   2),
+    ("ambient", "Ambient", 3),
     ("other",   "Other",   -1),  # -1 = no MIDI dispatch
 ]
 

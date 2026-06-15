@@ -7,7 +7,6 @@ import numpy as np
 import soundfile as sf
 from pydub import AudioSegment
 
-
 _SUPPORTED_NATIVE = {".wav", ".flac", ".ogg", ".aiff"}
 _SUPPORTED_PYDUB  = {".mp3", ".m4a", ".aac"}
 
