@@ -1,0 +1,42 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Database (user-specific library, not committed)
+*.db
+*.sqlite
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+dist/
+build/
+*.spec
+*.egg-info/
+
+# PyInstaller
+*.exe
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Audio files (large binaries, user-owned)
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg

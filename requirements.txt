@@ -1,0 +1,17 @@
+# Tier 1 — Analysis Pipeline
+librosa
+soundfile
+pydub
+numpy
+
+# Tier 2 — Playback Engine & MIDI
+sounddevice
+mido
+python-rtmidi
+
+# Tier 3 — Presentation
+PySide6
+pyqtgraph
+
+# Lyrics
+requests
