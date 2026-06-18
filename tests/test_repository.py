@@ -13,11 +13,12 @@ from tests.conftest import make_segment
 # Test 8
 def test_get_presets_returns_all_defaults(store):
     presets = store.get_presets()
-    assert len(presets) == 5
+    assert len(presets) == 6
     labels = {p.tone_label for p in presets}
-    assert labels == {"clean", "crunch", "metal", "ambient", "other"}
+    assert labels == {"clean", "edge", "crunch", "metal", "ambient", "other"}
     by_label = {p.tone_label: p for p in presets}
     assert by_label["clean"].pc_number == 0
+    assert by_label["edge"].pc_number == 4
     assert by_label["crunch"].pc_number == 1
     assert by_label["metal"].pc_number == 2
     assert by_label["ambient"].pc_number == 3
@@ -35,7 +36,7 @@ def test_get_presets_order(store):
 def test_save_preset_insert_new(store):
     store.save_preset(Preset(tone_label="lead", preset_name="Lead Tone", pc_number=10))
     presets = store.get_presets()
-    assert len(presets) == 6
+    assert len(presets) == 7
     labels = {p.tone_label for p in presets}
     assert "lead" in labels
 
@@ -44,7 +45,7 @@ def test_save_preset_insert_new(store):
 def test_save_preset_upsert_updates_existing(store):
     store.save_preset(Preset(tone_label="clean", preset_name="Clean Lead", pc_number=99))
     presets = store.get_presets()
-    assert len(presets) == 5  # no new row
+    assert len(presets) == 6  # no new row
     by_label = {p.tone_label: p for p in presets}
     assert by_label["clean"].pc_number == 99
     assert by_label["clean"].preset_name == "Clean Lead"

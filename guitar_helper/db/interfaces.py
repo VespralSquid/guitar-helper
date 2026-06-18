@@ -47,3 +47,14 @@ class ISegmentStore(ABC):
     @abstractmethod
     def save_preset(self, preset: Preset) -> None:
         """Insert or replace a preset row."""
+
+    @abstractmethod
+    def save_track(
+        self,
+        file_hash: str,
+        filename: str,
+        title: str | None,
+        artist: str | None,
+        duration_ms: int,
+    ) -> None:
+        """Insert track metadata if not already present (idempotent)."""

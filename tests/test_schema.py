@@ -44,7 +44,7 @@ def test_default_presets_seeded(db):
     rows = db.execute("SELECT tone_label FROM presets").fetchall()
     labels = {r[0] for r in rows}
     assert len(rows) == len(_DEFAULT_PRESETS)
-    assert labels == {"clean", "crunch", "metal", "ambient", "other"}
+    assert labels == {"clean", "edge", "crunch", "metal", "ambient", "other"}
 
 
 # -----------------------------------------------------------------------

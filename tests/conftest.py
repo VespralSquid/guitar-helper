@@ -1,4 +1,10 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
 import pytest
+import soundfile as sf
 
 from guitar_helper.db.interfaces import Segment
 from guitar_helper.db.repository import SQLiteSegmentStore
@@ -25,6 +31,17 @@ def track_hash(db):
     )
     db.commit()
     return "abc123"
+
+
+@pytest.fixture
+def make_wav(tmp_path):
+    def _make(filename: str = "test.wav", duration_s: float = 2.0, sr: int = 22050) -> Path:
+        t = np.linspace(0, duration_s, int(sr * duration_s), endpoint=False)
+        y = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        path = tmp_path / filename
+        sf.write(str(path), y, sr)
+        return path
+    return _make
 
 
 def make_segment(

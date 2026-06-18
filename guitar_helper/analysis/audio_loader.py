@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import librosa
 import numpy as np
 import soundfile as sf
 from pydub import AudioSegment
@@ -43,6 +44,15 @@ class AudioLoader:
         samples = y.shape[0]
         duration_ms = int(samples / sr * 1000)
         return y, sr, duration_ms, file_hash
+
+    def load_mono(self, path: str | Path, sr: int = 22050) -> tuple[np.ndarray, int]:
+        """Load resampled mono float32 signal for feature extraction.
+
+        Returns (y, sr) where y is 1-D float32 at the requested sample rate.
+        Reliable for WAV/FLAC/OGG/AIFF only until ffmpeg is installed.
+        """
+        y, sr_out = librosa.load(str(Path(path)), sr=sr, mono=True)
+        return y.astype(np.float32, copy=False), sr_out
 
     # ------------------------------------------------------------------
 

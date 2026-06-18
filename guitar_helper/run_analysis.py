@@ -1,0 +1,69 @@
+"""CLI runner: analyse an audio file and print the resulting segments.
+
+Usage:
+    python -m guitar_helper.run_analysis <path> [--title TITLE] [--artist ARTIST] [--k K]
+
+The results are stored in library.db and also printed to stdout.
+Copy the file_hash printed at the top to use with the correction CLI.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from guitar_helper.analysis.pipeline import AnalysisPipeline
+from guitar_helper.db.repository import SQLiteSegmentStore
+from guitar_helper.db.schema import init_db
+
+
+def _format_ms(ms: int) -> str:
+    total_s, millis = divmod(ms, 1000)
+    minutes, seconds = divmod(total_s, 60)
+    return f"{minutes}:{seconds:02d}.{millis:03d}"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Analyse an audio file and store segments.")
+    parser.add_argument("path", help="Path to the audio file (WAV/FLAC/OGG)")
+    parser.add_argument("--title", default=None)
+    parser.add_argument("--artist", default=None)
+    parser.add_argument("--k", type=int, default=None, help="Force segment count (default: auto-detect)")
+    parser.add_argument("--db", default="library.db", help="SQLite database path")
+    parser.add_argument("--verbose", action="store_true", help="Print segmenter diagnostics")
+    args = parser.parse_args()
+
+    path = Path(args.path)
+    if not path.exists():
+        print(f"Error: file not found — {path}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Analysing: {path.name}")
+    if args.k:
+        print(f"  k={args.k} (forced)")
+
+    conn = init_db(args.db)
+    store = SQLiteSegmentStore(conn)
+    segments = AnalysisPipeline(store, verbose=args.verbose).run(
+        path, title=args.title, artist=args.artist, k=args.k
+    )
+
+    file_hash = segments[0].file_hash if segments else "—"
+    print(f"\nfile_hash : {file_hash}")
+    print(f"segments  : {len(segments)}\n")
+
+    for i, s in enumerate(segments):
+        corrected = " [corrected]" if s.manually_corrected else ""
+        print(
+            f"  [{i}]  {_format_ms(s.start_ms)} -> {_format_ms(s.end_ms)}"
+            f"  |  {s.tone_label:<8}"
+            f"  |  conf={s.confidence:.2f}"
+            f"{corrected}"
+        )
+
+    print(f"\nStored in {args.db}.")
+    print(f"To correct: python -m guitar_helper.run_correction {file_hash}")
+
+
+if __name__ == "__main__":
+    main()

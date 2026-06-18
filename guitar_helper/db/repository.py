@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from .interfaces import ISegmentStore, Preset, Segment
+from .schema import _utcnow
 
 
 class SQLiteSegmentStore(ISegmentStore):
@@ -107,6 +108,24 @@ class SQLiteSegmentStore(ISegmentStore):
                     pc_number   = excluded.pc_number
             """,
             (preset.tone_label, preset.preset_name, preset.pc_number),
+        )
+        self._conn.commit()
+
+    def save_track(
+        self,
+        file_hash: str,
+        filename: str,
+        title: str | None,
+        artist: str | None,
+        duration_ms: int,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO tracks
+                (file_hash, filename, title, artist, duration_ms, analysed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (file_hash, filename, title, artist, duration_ms, _utcnow()),
         )
         self._conn.commit()
 

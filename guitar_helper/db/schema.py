@@ -39,11 +39,12 @@ CREATE INDEX IF NOT EXISTS idx_seg_lookup
 _CURRENT_VERSION = 1
 
 _DEFAULT_PRESETS = [
-    ("clean",   "Clean",   0),
-    ("crunch",  "Crunch",  1),
-    ("metal",   "Metal",   2),
-    ("ambient", "Ambient", 3),
-    ("other",   "Other",   -1),  # -1 = no MIDI dispatch
+    ("clean",   "Clean",            0),
+    ("edge",    "Edge of Breakup",  4),
+    ("crunch",  "Crunch",           1),
+    ("metal",   "Metal",            2),
+    ("ambient", "Ambient",          3),
+    ("other",   "Other",           -1),  # -1 = no MIDI dispatch
 ]
 
 
