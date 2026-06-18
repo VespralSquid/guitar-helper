@@ -37,32 +37,27 @@ _Last updated: 2026-06-18_
 - `.claude/commands/phase-plan.md` — `/phase-plan` spawns Opus Plan agent
 - `.claude/commands/quick-docs.md` — `/quick-docs` spawns Haiku for docs
 
-### Phase 2 — Analysis Pipeline (CODE DONE, CALIBRATION PENDING)
-- `guitar_helper/analysis/feature_extractor.py` — 24-feature matrix (flatness, ZCR, RMS, centroid, contrast×7, MFCC×13), min-max normalised per row
-- `guitar_helper/analysis/segmenter.py` — cosine-distance auto-k (fixed from broken checkerboard approach, see ISSUE-001)
-- `guitar_helper/analysis/tone_classifier.py` — `BaseToneClassifier` ABC + `ThresholdClassifier` with placeholder archetypes
-- `guitar_helper/analysis/pipeline.py` — `AnalysisPipeline.run()` orchestrator
+### Phase 2 — Analysis Pipeline (DONE, CALIBRATION PENDING)
+- `guitar_helper/analysis/feature_extractor.py` — 24-feature matrix; `extract()` per-song normalized (segmenter), `extract_for_classification()` fixed-range normalized (classifier)
+- `guitar_helper/analysis/segmenter.py` — cosine-distance auto-k (ISSUE-001 resolved)
+- `guitar_helper/analysis/tone_classifier.py` — `BaseToneClassifier` ABC + `ThresholdClassifier`; archetypes calibrated to fixed-range normalization scale
+- `guitar_helper/analysis/pipeline.py` — `AnalysisPipeline.run()` orchestrator; routes to two matrices
 - `guitar_helper/correction/cli.py` — interactive label + boundary correction tool
 - `guitar_helper/run_analysis.py` — CLI runner (--verbose, --k, --title, --artist, --db)
 - `guitar_helper/run_correction.py` — CLI runner
 - `print_db.py` — dev utility to dump DB contents
-- 45/45 tests passing, ruff clean
+- 47/47 tests passing, ruff clean
+- edge-of-breakup tone added (PC4); library.db seeded
 
 ### Analysis Debug Docs (DONE)
-- `docs/debug/ISSUE-001-segmentation-k1.md` — k=1 bug report (resolved)
-- Debug documentation workflow added to CLAUDE.md
+- `docs/debug/ISSUE-001-SEGMENTER_BUG_REPORT.md` — k=1 bug (resolved)
+- `docs/debug/ISSUE-002-classification-normalization.md` — per-song norm bug (resolved)
+- Debug documentation workflow in CLAUDE.md
 
-### DB Contents (2 real songs analysed)
-- gunslinger_A7X.wav (4:11, 8 segments)
-- I_hate_everything_about_you_3DG.wav (3:51, 8 segments)
-
----
-
-## Currently Blocked — ISSUE-002
-
-**Problem:** Classification returns only clean/crunch regardless of tone. Per-song min-max normalisation in FeatureExtractor destroys absolute spectral values. Archetypes in ThresholdClassifier calibrated for absolute [0,1] but normalisation maps every song's range to [0,1], clustering segment means around 0.3–0.5, never reaching metal archetype (0.9).
-
-**Fix direction:** Use two representations — normalised matrix for segmenter (unchanged), raw/clipped features for classifier.
+### DB Contents (3 real songs analysed)
+- gunslinger_A7X.wav (4:11, 8 segments — edge/crunch)
+- I_hate_everything_about_you_3DG.wav (3:51, 8 segments — edge/crunch)
+- carry_on_my_wayward_son_Kansas.wav (5:23, 8 segments — metal/crunch/edge)
 
 ---
 
@@ -108,7 +103,8 @@ PyInstaller `.exe`, bundled ffmpeg, setup guide, AAC/M4A validation
 
 **Segmenter / Calibration**
 - Segmenter verbose flag: pass `--verbose` to `run_analysis` to see k estimation diagnostics
-- Calibration pass on 5–10 songs needed after ISSUE-002 fixed
+- Calibration pass on 5–10 songs needed: measure actual fixed-range normalized feature means per tone, update ThresholdClassifier.DEFAULT_ARCHETYPES
+- Classification normalization: fixed-range clip per feature (flatness/zcr/rms→[0,0.25], centroid→[0,sr/2], contrast→[0,40dB], mfcc[0]→[-300,50], mfcc[1:]→[-60,60])
 
 **Decisions made verbally (not in report)**
 - Segment Correction Tool: CLI in Phase 2 (done), embed in UI in Phase 4
