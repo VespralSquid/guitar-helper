@@ -1,114 +1,113 @@
 # Save State — Guitar Helper
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-19_
 
 ---
 
 ## Completed
 
 ### Design / Planning
-- v0.1 report — initial Spotify-based design (now obsolete)
-- v0.1 critique — identified 15+ issues incl. Spotify API deprecation
-- v0.2 report — switched offline analysis to librosa; Spotify runtime retained
-- Full feasibility analysis: sounddevice (Option B) chosen over VLC for raw audio access
-- v0.3 report (`Guitar_Performance_Assistant_Report_v0.3.md`) — canonical design doc, fully offline, 3-tier SOLID architecture
-- Multi-phase build plan documented in plan file
+- v0.3 report — canonical design doc, fully offline, 3-tier SOLID architecture
+- Full feasibility analysis: sounddevice chosen over VLC
+- Multi-phase build plan documented
 
 ### Phase 1 — Foundation (DONE)
-- `requirements.txt` — all deps installed, smoke-tested
-- `guitar_helper/db/schema.py` — `init_db()`, DDL, preset seed
-- `guitar_helper/db/interfaces.py` — `ISegmentStore` ABC, `Segment` + `Preset` dataclasses
-- `guitar_helper/db/repository.py` — `SQLiteSegmentStore`
-- `guitar_helper/analysis/audio_loader.py` — `AudioLoader.load()` (soundfile + pydub, SHA-256) + `load_mono()` (librosa)
-- `ISegmentStore.save_track()` implemented
-- All package `__init__.py` stubs created
-- Phase 1 smoke test passed (DB init, preset seed, import checks)
+- DB layer: schema.py, interfaces.py, repository.py
+- AudioLoader: load() (hash+duration), load_mono() (librosa)
+- ISegmentStore.save_track() implemented
+- All package __init__.py stubs created
 
 ### Version Control / CI (DONE)
-- Git repo initialised, `main` branch
-- `.gitignore`, `.gitattributes`
-- GitHub repo: `VespralSquid/guitar-helper` (private)
-- GitHub Actions CI: `windows-latest`, Python 3.14, ruff + pytest on push/PR to main
-- `ruff.toml` linting config
-- `tests/` stub directory
-- Initial commit pushed; CI passing
+- GitHub: VespralSquid/guitar-helper (private)
+- GitHub Actions CI: windows-latest, Python 3.14, ruff + pytest on push/PR to main
 
 ### Multi-Agent CLI Setup (DONE)
-- `CLAUDE.md` — project brief, routing rules, coding conventions, debug workflow
-- `.claude/commands/phase-plan.md` — `/phase-plan` spawns Opus Plan agent
-- `.claude/commands/quick-docs.md` — `/quick-docs` spawns Haiku for docs
+- CLAUDE.md, /phase-plan (Opus), /quick-docs (Haiku)
 
 ### Phase 2 — Analysis Pipeline (DONE, CALIBRATION PENDING)
-- `guitar_helper/analysis/feature_extractor.py` — 24-feature matrix; `extract()` per-song normalized (segmenter), `extract_for_classification()` fixed-range normalized (classifier)
-- `guitar_helper/analysis/segmenter.py` — cosine-distance auto-k (ISSUE-001 resolved)
-- `guitar_helper/analysis/tone_classifier.py` — `BaseToneClassifier` ABC + `ThresholdClassifier`; archetypes calibrated to fixed-range normalization scale
-- `guitar_helper/analysis/pipeline.py` — `AnalysisPipeline.run()` orchestrator; routes to two matrices
-- `guitar_helper/correction/cli.py` — interactive label + boundary correction tool
-- `guitar_helper/run_analysis.py` — CLI runner (--verbose, --k, --title, --artist, --db)
-- `guitar_helper/run_correction.py` — CLI runner
-- `print_db.py` — dev utility to dump DB contents
-- 47/47 tests passing, ruff clean
-- edge-of-breakup tone added (PC4); library.db seeded
+- feature_extractor.py — 24-feature matrix; extract() per-song norm (segmenter), extract_for_classification() fixed-range norm (classifier); use_hpss option
+- segmenter.py — cosine-distance auto-k (ISSUE-001 resolved)
+- tone_classifier.py — ThresholdClassifier; auto-loads archetypes.json if present; falls back to DEFAULT_ARCHETYPES
+- pipeline.py — separates guitar stem first, then loads stem for features; separator= and use_hpss= params
+- source_separator.py — ISourceSeparator ABC; NullSeparator (passthrough); AudioSeparator (htdemucs_6s, stems cached at stems/<hash>_guitar.wav, lazy torch import)
+- correction/cli.py — interactive label + boundary correction
+- run_analysis.py — --no-separate, --hpss, --stems-dir, --model-dir, --verbose, --k
+- run_batch.py — folder/playlist analysis; skip-by-hash (--reanalyze); mutagen tag reading; --recursive; summary + hashes for run_correction
+- run_calibrate.py — queries manually_corrected=1 segments, re-extracts clf features from stems, computes per-tone mean, writes archetypes.json; --min-segments (default 3)
+- print_db.py — dev utility
+- 67/67 tests passing, ruff clean
+- edge-of-breakup tone (PC4); library.db seeded
+- docs/batch-analysis-plan.md saved
 
-### Analysis Debug Docs (DONE)
-- `docs/debug/ISSUE-001-SEGMENTER_BUG_REPORT.md` — k=1 bug (resolved)
-- `docs/debug/ISSUE-002-classification-normalization.md` — per-song norm bug (resolved)
-- Debug documentation workflow in CLAUDE.md
+### Debug Docs
+- docs/debug/ISSUE-001 — k=1 bug (resolved)
+- docs/debug/ISSUE-002 — per-song norm bug (resolved)
+- docs/debug/ISSUE-003 — edge/crunch overlap (open, calibration pending)
 
-### DB Contents (3 real songs analysed)
-- gunslinger_A7X.wav (4:11, 8 segments — edge/crunch)
-- I_hate_everything_about_you_3DG.wav (3:51, 8 segments — edge/crunch)
-- carry_on_my_wayward_son_Kansas.wav (5:23, 8 segments — metal/crunch/edge)
+---
+
+## In Progress
+- Full reanalysis of 9 songs with stem separation (run_batch --reanalyze, started 2026-06-19 ~15:00, ~3 min/song)
+- Songs: bat_country_A7X, black_dog_SAMURAI, carry_on_my_wayward_son_Kansas, desecrate_through_reverence_A7X, euphoria_polyphia, gunslinger_A7X, I_hate_everything_about_you_3DG, let_it_die_3DG, never_too_late_3DG
 
 ---
 
 ## Pending
 
+### Calibration (ISSUE-003 Fix A — next immediate step)
+- Label segments via run_correction — target 8-12 per tone across 5+ songs
+- Run run_calibrate → writes archetypes.json
+- Re-batch --no-separate --reanalyze to apply calibrated archetypes
+- Write ISSUE-003 resolution doc once done
+
 ### Phase 3 — Playback + MIDI
-`AudioBuffer`, `PlaybackEngine` (sounddevice), `PositionTracker`, `SegmentLookup`, `MidiDispatcher`, `IMidiPort` / `MidoPort` / `MockMidiPort`
+AudioBuffer, PlaybackEngine (sounddevice), PositionTracker, SegmentLookup, MidiDispatcher, IMidiPort/MidoPort/MockMidiPort
 
 ### Phase 4 — UI
-PySide6 `MainWindow`, `TransportControls`, `VisualizationBridge`, `SpectrumAnalyzer`, `WaveformView`, `LyricsDisplay`, `SegmentOverlay`; LrcLib client + LRC parser; preset management UI panel
+PySide6 MainWindow, TransportControls, VisualizationBridge, SpectrumAnalyzer, WaveformView, LyricsDisplay, SegmentOverlay; LrcLib client + LRC parser; preset management panel
 
 ### Phase 5 — Distribution
-PyInstaller `.exe`, bundled ffmpeg, setup guide, AAC/M4A validation
+PyInstaller .exe, bundled ffmpeg, setup guide, AAC/M4A validation
 
 ---
 
 ## Critical Facts
 
 **Environment**
-- Python 3.14.3 (very new — some packages compiled from source)
-- python-rtmidi built from source (no 3.14 wheel)
-- ffmpeg NOT installed — WAV/FLAC/OGG work; MP3/AAC blocked until installed
+- Python 3.14.3, Windows 11; venv at .venv/
+- ffmpeg NOW INSTALLED (v8.0.1) — MP3/M4A/AAC unblocked
+- audio-separator 0.44.2 — separate install (requirements-separation.txt); htdemucs_6s.yaml cached at /tmp/audio-separator-models/
+- python-rtmidi: no cp314 wheel, must build from source
+- ruff.toml: target-version=py312 (no py314 target yet)
 
 **GitHub / CI**
-- Repo: `VespralSquid/guitar-helper` (private)
-- CI runner: `windows-latest`
-- `ruff.toml`: `target-version = "py312"` (ruff has no py314 target yet; py312 safe)
+- Repo: VespralSquid/guitar-helper (private), CI: windows-latest
 
-**MIDI (corrected from old save)**
-- clean=PC0, crunch=PC1, metal=PC2, ambient=PC3, other=-1 (no dispatch, hold current)
-- `presets` table is source of truth; never hardcode PC numbers
+**MIDI**
+- clean=PC0, crunch=PC1, metal=PC2, ambient=PC3, edge=PC4, other=-1 (no dispatch)
+- presets table is source of truth; never hardcode PC numbers
+
+**Calibration**
+- archetypes.json: project root, auto-loaded by ThresholdClassifier on init
+- Tones without enough labels fall back to DEFAULT_ARCHETYPES
+- Target: 8-12 labeled segments per tone across 5+ songs
+- After calibration: re-batch with --no-separate (stems cached, fast)
 
 **DB**
-- `segments.tone_label` FK references `presets.tone_label`
-- Custom tones require inserting into `presets` first
-- Re-analysis always replaces all segments including manually corrected ones (decided during Phase 2)
+- segments.tone_label FK references presets.tone_label
+- Re-analysis always replaces all segments incl. manually corrected ones
 
-**Audio**
-- `AudioLoader.load()` = hash + duration (soundfile path)
-- `AudioLoader.load_mono()` = librosa mono at sr=22050 (now implemented)
-- Multi-channel from soundfile: shape `(samples, channels)`; librosa: mono `(samples,)`
-- Primary target: iTunes `.m4a` (AAC) — requires ffmpeg
+**Audio / Pipeline**
+- Stem pipeline: separate_guitar() → load_mono(stem) → extract features
+- --no-separate uses full mix (NullSeparator passthrough)
+- Primary target: iTunes .m4a (AAC) — now unblocked with ffmpeg installed
 
-**Segmenter / Calibration**
-- Segmenter verbose flag: pass `--verbose` to `run_analysis` to see k estimation diagnostics
-- Calibration pass on 5–10 songs needed: measure actual fixed-range normalized feature means per tone, update ThresholdClassifier.DEFAULT_ARCHETYPES
-- Classification normalization: fixed-range clip per feature (flatness/zcr/rms→[0,0.25], centroid→[0,sr/2], contrast→[0,40dB], mfcc[0]→[-300,50], mfcc[1:]→[-60,60])
+**Issues**
+- ISSUE-001: Resolved (cosine distance auto-k)
+- ISSUE-002: Architecture fixed (fixed-range normalization); calibration pending
+- ISSUE-003: Open — edge/crunch coincident in 5-feature space; MFCCs unused; fix = archetypes.json from labeled data
 
-**Decisions made verbally (not in report)**
-- Segment Correction Tool: CLI in Phase 2 (done), embed in UI in Phase 4
-- Boundary editing: both `start_ms`/`end_ms` AND label
-- Lyrics: LrcLib API auto-fetch, fallback to local `.lrc`
-- PyInstaller `.exe` is v1 goal
-- Tone taxonomy extensible via UI (add presets at runtime, no code change needed)
+**Decisions (verbal, not in report)**
+- Segment Correction: CLI in Phase 2 (done), embed in UI in Phase 4
+- Lyrics: LrcLib API auto-fetch, fallback to local .lrc
+- PyInstaller .exe is v1 goal
+- Batch analysis skips already-analyzed songs by hash; --reanalyze to force
