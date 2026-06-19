@@ -3,6 +3,7 @@ librosa
 soundfile
 pydub
 numpy
+mutagen
 
 # Tier 2 — Playback Engine & MIDI
 sounddevice
@@ -15,3 +16,5 @@ pyqtgraph
 
 # Lyrics
 requests
+
+# Optional: guitar source separation — see requirements-separation.txt (heavy: torch + onnxruntime)
