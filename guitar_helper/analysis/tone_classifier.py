@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
 
@@ -48,19 +50,26 @@ class ThresholdClassifier(BaseToneClassifier):
         # flatness  zcr    rms    centroid  contrast
         "clean":   _archetype(0.12, 0.22, 0.30, 0.19, contrast=0.75),
         "edge":    _archetype(0.20, 0.28, 0.35, 0.22, contrast=0.67),
-        "crunch":  _archetype(0.35, 0.40, 0.40, 0.25, contrast=0.50),
+        "crunch":  _archetype(0.40, 0.44, 0.425, 0.275, contrast=0.46),
         "metal":   _archetype(0.60, 0.60, 0.55, 0.36, contrast=0.25),
         "ambient": _archetype(0.10, 0.10, 0.15, 0.13, contrast=0.88),
     }
 
-    def __init__(self, archetypes: dict[str, np.ndarray] | None = None) -> None:
+    def __init__(
+        self,
+        archetypes: dict[str, np.ndarray] | None = None,
+        calibration_path: str | Path | None = "archetypes.json",
+    ) -> None:
         if archetypes is not None:
-            self._archetypes = {k: np.asarray(v, dtype=np.float32) for k, v in archetypes.items()}
+            source: dict = archetypes
         else:
-            self._archetypes = {
-                k: np.asarray(v, dtype=np.float32)
-                for k, v in self.DEFAULT_ARCHETYPES.items()
-            }
+            cal = Path(calibration_path) if calibration_path is not None else None
+            if cal is not None and cal.exists():
+                with cal.open() as f:
+                    source = json.load(f)
+            else:
+                source = self.DEFAULT_ARCHETYPES
+        self._archetypes = {k: np.asarray(v, dtype=np.float32) for k, v in source.items()}
 
     def classify(self, feature_vector: np.ndarray) -> tuple[str, float]:
         vec = np.asarray(feature_vector, dtype=np.float32)
