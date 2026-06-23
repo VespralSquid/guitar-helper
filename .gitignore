@@ -34,9 +34,23 @@ Thumbs.db
 *.log
 
 # Audio files (large binaries, user-owned)
+music/
 *.mp3
 *.wav
 *.flac
 *.m4a
 *.aac
 *.ogg
+
+# Source separation: cached guitar stems + downloaded model weights
+stems/
+audio-separator-models/
+
+# Local tooling / experiments (kept out of the repo)
+.claude/
+docs/experiments/
+guitar_helper/experiments/
+tests/test_calibration_eval.py
+
+# Experiment outputs (EXP-NNN harness results, not committed)
+results/

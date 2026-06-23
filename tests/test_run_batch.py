@@ -3,13 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-import soundfile as sf
 import numpy as np
+import soundfile as sf
 
-from guitar_helper.run_batch import _discover_audio, _read_tags, _tone_summary, _AUDIO_EXTENSIONS
 from guitar_helper.db.interfaces import Segment
-
+from guitar_helper.run_batch import _AUDIO_EXTENSIONS, _discover_audio, _read_tags, _tone_summary
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -115,7 +113,7 @@ def test_tone_summary_empty():
 # ---------------------------------------------------------------------------
 
 def test_batch_skips_already_analyzed(tmp_path, capsys):
-    wav = _write_wav(tmp_path / "song.wav")
+    _write_wav(tmp_path / "song.wav")
 
     mock_store = MagicMock()
     mock_store.get_segments.return_value = [_make_segment("fakehash")]
@@ -130,8 +128,9 @@ def test_batch_skips_already_analyzed(tmp_path, capsys):
         patch("guitar_helper.run_batch.NullSeparator"),
     ):
         MockLoader.return_value.load.return_value = (5000, "fakehash")
-        from guitar_helper.run_batch import main
         import sys
+
+        from guitar_helper.run_batch import main
         sys.argv = ["run_batch", str(tmp_path), "--no-separate"]
         main()
 
@@ -141,7 +140,7 @@ def test_batch_skips_already_analyzed(tmp_path, capsys):
 
 
 def test_batch_reanalyze_flag_bypasses_skip(tmp_path, capsys):
-    wav = _write_wav(tmp_path / "song.wav")
+    _write_wav(tmp_path / "song.wav")
 
     mock_store = MagicMock()
     mock_store.get_segments.return_value = [_make_segment("fakehash")]
@@ -157,8 +156,9 @@ def test_batch_reanalyze_flag_bypasses_skip(tmp_path, capsys):
         patch("guitar_helper.run_batch.NullSeparator"),
     ):
         MockLoader.return_value.load.return_value = (5000, "fakehash")
-        from guitar_helper.run_batch import main
         import sys
+
+        from guitar_helper.run_batch import main
         sys.argv = ["run_batch", str(tmp_path), "--no-separate", "--reanalyze"]
         main()
 
@@ -196,8 +196,9 @@ def test_batch_continues_after_failure(tmp_path, capsys):
         patch("guitar_helper.run_batch.NullSeparator"),
     ):
         MockLoader.return_value.load.return_value = (5000, "h")
-        from guitar_helper.run_batch import main
         import sys
+
+        from guitar_helper.run_batch import main
         sys.argv = ["run_batch", str(tmp_path), "--no-separate"]
         main()
 

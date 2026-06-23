@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from .interfaces import ISegmentStore, Preset, Segment
-from .schema import _utcnow
+from .schema import utcnow
 
 
 class SQLiteSegmentStore(ISegmentStore):
@@ -125,9 +125,23 @@ class SQLiteSegmentStore(ISegmentStore):
                 (file_hash, filename, title, artist, duration_ms, analysed_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (file_hash, filename, title, artist, duration_ms, _utcnow()),
+            (file_hash, filename, title, artist, duration_ms, utcnow()),
         )
         self._conn.commit()
+
+    def set_calibration_excluded(self, file_hash: str, excluded: bool) -> None:
+        self._conn.execute(
+            "UPDATE tracks SET calibration_excluded = ? WHERE file_hash = ?",
+            (1 if excluded else 0, file_hash),
+        )
+        self._conn.commit()
+
+    def get_calibration_excluded(self, file_hash: str) -> bool:
+        row = self._conn.execute(
+            "SELECT calibration_excluded FROM tracks WHERE file_hash = ?",
+            (file_hash,),
+        ).fetchone()
+        return bool(row[0]) if row else False
 
 
 # ------------------------------------------------------------------

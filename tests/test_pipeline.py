@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from guitar_helper.analysis.pipeline import AnalysisPipeline
+from guitar_helper.analysis.source_separator import ISourceSeparator
 from guitar_helper.analysis.tone_classifier import TONE_LABELS
 from guitar_helper.db.interfaces import ISegmentStore, Preset, Segment
 
@@ -34,6 +37,12 @@ class MockStore(ISegmentStore):
     def save_preset(self, preset) -> None:
         pass
 
+    def set_calibration_excluded(self, file_hash, excluded) -> None:
+        pass
+
+    def get_calibration_excluded(self, file_hash) -> bool:
+        return False
+
 
 def test_pipeline_run_produces_segments(make_wav):
     path = make_wav(duration_s=3.0)
@@ -55,7 +64,7 @@ def test_pipeline_first_segment_starts_at_zero(make_wav):
 def test_pipeline_last_segment_ends_at_duration(make_wav):
     from guitar_helper.analysis.audio_loader import AudioLoader
     path = make_wav(duration_s=3.0)
-    _, _, duration_ms, _ = AudioLoader().load(path)
+    duration_ms, _ = AudioLoader().load(path)
     store = MockStore()
     segments = AnalysisPipeline(store).run(path)
     assert segments[-1].end_ms == duration_ms
@@ -75,3 +84,30 @@ def test_pipeline_segments_are_contiguous(make_wav):
     segments = AnalysisPipeline(store).run(path)
     for a, b in zip(segments[:-1], segments[1:]):
         assert a.end_ms == b.start_ms
+
+
+class RecordingSeparator(ISourceSeparator):
+    def __init__(self, stem_path: Path) -> None:
+        self.stem_path = stem_path
+        self.calls: list[tuple[Path, str]] = []
+
+    def separate_guitar(self, path: Path, file_hash: str) -> Path:
+        self.calls.append((Path(path), file_hash))
+        return self.stem_path
+
+
+def test_pipeline_uses_separated_stem_for_classification(make_wav):
+    mix = make_wav("mix.wav", duration_s=3.0)
+    stem = make_wav("stem.wav", duration_s=3.0)
+    separator = RecordingSeparator(stem)
+    store = MockStore()
+
+    segments = AnalysisPipeline(store, separator=separator).run(mix)
+
+    # Separator invoked once with the original mix path and the file hash.
+    assert len(separator.calls) == 1
+    assert separator.calls[0][0] == mix
+    assert separator.calls[0][1] != ""
+    # Guitar stem drives both segmentation and classification.
+    assert segments[0].start_ms == 0
+    assert all(s.tone_label in TONE_LABELS for s in segments)

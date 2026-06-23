@@ -20,8 +20,36 @@ def _format_segment(idx: int, seg: Segment) -> str:
     )
 
 
+def _confirm(seg: Segment) -> Segment:
+    """Affirm a segment's existing label as user-verified ground truth."""
+    return Segment(
+        id=seg.id, file_hash=seg.file_hash,
+        start_ms=seg.start_ms, end_ms=seg.end_ms,
+        tone_label=seg.tone_label, confidence=1.0, manually_corrected=True,
+    )
+
+
+def _parse_confirm(tokens: list[str], segments: list[Segment]) -> tuple[Segment, ...] | None:
+    """Parse a `confirm <idx>` or `confirm all` command."""
+    if len(tokens) != 2:
+        return None
+    if tokens[1] == "all":
+        return tuple(_confirm(s) for s in segments)
+    try:
+        idx = int(tokens[1])
+    except ValueError:
+        return None
+    if idx < 0 or idx >= len(segments):
+        print(f"  Index {idx} out of range (0–{len(segments) - 1}).")
+        return None
+    return (_confirm(segments[idx]),)
+
+
 def _parse_command(tokens: list[str], segments: list[Segment]) -> tuple[Segment, ...] | None:
     """Parse a correction command. Returns tuple of updated Segment(s) or None on error."""
+    if tokens[0] == "confirm":
+        return _parse_confirm(tokens, segments)
+
     try:
         idx = int(tokens[0])
     except (ValueError, IndexError):
@@ -57,6 +85,12 @@ def _parse_command(tokens: list[str], segments: list[Segment]) -> tuple[Segment,
         if start_ms >= end_ms:
             print("  start_ms must be less than end_ms.")
             return None
+        if idx > 0 and start_ms < segments[idx - 1].end_ms:
+            print(f"  start_ms {start_ms} overlaps segment {idx - 1} (ends at {segments[idx - 1].end_ms}).")
+            return None
+        if idx < len(segments) - 1 and end_ms > segments[idx + 1].start_ms:
+            print(f"  end_ms {end_ms} overlaps segment {idx + 1} (starts at {segments[idx + 1].start_ms}).")
+            return None
         return (Segment(
             id=seg.id, file_hash=seg.file_hash,
             start_ms=start_ms, end_ms=end_ms,
@@ -79,8 +113,15 @@ class SegmentCorrectionTool:
 
         pending: dict[int, Segment] = {}
 
+        excluded = self._store.get_calibration_excluded(file_hash)
+        excl_status = "EXCLUDED from calibration" if excluded else "included in calibration"
+
         print("\nSegment Correction Tool")
-        print("Commands:  <idx> <label>  |  <idx> <start_ms> <end_ms> <label>  |  s=save  q=quit\n")
+        print(f"Track calibration status: {excl_status}")
+        print(
+            "Commands:  <idx> <label>  |  <idx> <start_ms> <end_ms> <label>"
+            "  |  confirm <idx>  |  confirm all  |  exclude  |  include  |  s=save  q=quit\n"
+        )
 
         while True:
             for i, seg in enumerate(segments):
@@ -97,6 +138,16 @@ class SegmentCorrectionTool:
                 print("Quit without saving.")
                 return
 
+            if raw == "exclude":
+                self._store.set_calibration_excluded(file_hash, True)
+                print("  Track marked as EXCLUDED from calibration.\n")
+                continue
+
+            if raw == "include":
+                self._store.set_calibration_excluded(file_hash, False)
+                print("  Track marked as included in calibration.\n")
+                continue
+
             if raw == "s":
                 for idx, updated in pending.items():
                     self._store.update_segment(updated)
@@ -106,7 +157,7 @@ class SegmentCorrectionTool:
             tokens = raw.split()
             result = _parse_command(tokens, segments)
             if result is None:
-                print("  Invalid command. Try:  0 metal  |  0 1000 5000 crunch  |  s  |  q\n")
+                print("  Invalid command. Try:  0 metal  |  0 1000 5000 crunch  |  confirm 0  |  confirm all  |  s  |  q\n")
                 continue
 
             for updated in result:

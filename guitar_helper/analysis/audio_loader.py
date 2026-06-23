@@ -13,16 +13,12 @@ _SUPPORTED_PYDUB  = {".mp3", ".m4a", ".aac"}
 
 
 class AudioLoader:
-    """Load an audio file into memory and compute its SHA-256 hash."""
 
-    def load(self, path: str | Path) -> tuple[np.ndarray, int, int, str]:
-        """
-        Returns
-        -------
-        y           : float32 numpy array, shape (samples, channels) or (samples,)
-        sr          : sample rate in Hz
-        duration_ms : total duration in milliseconds
-        file_hash   : SHA-256 hex digest of the raw file bytes
+    def load(self, path: str | Path) -> tuple[int, str]:
+        """Return (duration_ms, file_hash) without decoding audio data.
+
+        Uses soundfile.info() for native formats — no full decode.
+        Pydub formats still require ffmpeg and decode to get duration.
         """
         path = Path(path)
         if not path.exists():
@@ -32,18 +28,18 @@ class AudioLoader:
         suffix = path.suffix.lower()
 
         if suffix in _SUPPORTED_NATIVE:
-            y, sr = sf.read(str(path), dtype="float32", always_2d=False)
+            info = sf.info(str(path))
+            duration_ms = int(info.frames / info.samplerate * 1000)
         elif suffix in _SUPPORTED_PYDUB:
-            y, sr = self._load_via_pydub(path)
+            audio = AudioSegment.from_file(str(path))
+            duration_ms = int(audio.duration_seconds * 1000)
         else:
             raise ValueError(
                 f"Unsupported format '{suffix}'. "
                 f"Supported: {_SUPPORTED_NATIVE | _SUPPORTED_PYDUB}"
             )
 
-        samples = y.shape[0]
-        duration_ms = int(samples / sr * 1000)
-        return y, sr, duration_ms, file_hash
+        return duration_ms, file_hash
 
     def load_mono(self, path: str | Path, sr: int = 22050) -> tuple[np.ndarray, int]:
         """Load resampled mono float32 signal for feature extraction.
@@ -63,14 +59,3 @@ class AudioLoader:
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
         return h.hexdigest()
-
-    @staticmethod
-    def _load_via_pydub(path: Path) -> tuple[np.ndarray, int]:
-        audio = AudioSegment.from_file(str(path))
-        sr = audio.frame_rate
-        samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
-        # Normalise to [-1, 1]
-        samples /= float(2 ** (8 * audio.sample_width - 1))
-        if audio.channels > 1:
-            samples = samples.reshape(-1, audio.channels)
-        return samples, sr

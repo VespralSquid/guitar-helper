@@ -5,7 +5,6 @@ import pytest
 
 from guitar_helper.analysis.feature_extractor import N_FEATURES, FeatureExtractor
 
-
 SR = 22050
 HOP = 512
 

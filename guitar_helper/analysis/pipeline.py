@@ -7,6 +7,7 @@ from guitar_helper.db.interfaces import ISegmentStore, Segment
 from .audio_loader import AudioLoader
 from .feature_extractor import FeatureExtractor
 from .segmenter import Segmenter
+from .source_separator import ISourceSeparator, NullSeparator
 from .tone_classifier import BaseToneClassifier, ThresholdClassifier
 
 _HOP = 512
@@ -18,12 +19,15 @@ class AnalysisPipeline:
         self,
         store: ISegmentStore,
         classifier: BaseToneClassifier | None = None,
+        separator: ISourceSeparator | None = None,
         verbose: bool = False,
+        use_hpss: bool = False,
     ) -> None:
         self._store = store
         self._classifier = classifier or ThresholdClassifier()
+        self._separator = separator or NullSeparator()
         self._loader = AudioLoader()
-        self._extractor = FeatureExtractor(hop_length=_HOP)
+        self._extractor = FeatureExtractor(hop_length=_HOP, use_hpss=use_hpss)
         self._segmenter = Segmenter(hop_length=_HOP, verbose=verbose)
 
     def run(
@@ -35,13 +39,16 @@ class AnalysisPipeline:
     ) -> list[Segment]:
         path = Path(path)
 
-        _y_raw, _sr_raw, duration_ms, file_hash = self._loader.load(path)
-        y, sr = self._loader.load_mono(path)
+        duration_ms, file_hash = self._loader.load(path)
+        clf_path = self._separator.separate_guitar(path, file_hash)
+        # Guitar stem drives both segmentation and classification (full mix when
+        # separation is disabled), so boundaries track guitar-tone changes.
+        y, sr = self._loader.load_mono(clf_path)
 
         feature_matrix = self._extractor.extract(y, sr)
         clf_matrix = self._extractor.extract_for_classification(y, sr)
         boundaries = self._segmenter.find_boundaries(
-            feature_matrix, sr, hop_length=_HOP, k=k, duration_ms=duration_ms
+            feature_matrix, sr, k=k, duration_ms=duration_ms
         )
 
         n_frames = feature_matrix.shape[1]

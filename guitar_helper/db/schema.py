@@ -14,12 +14,13 @@ CREATE TABLE IF NOT EXISTS presets (
 );
 
 CREATE TABLE IF NOT EXISTS tracks (
-    file_hash   TEXT PRIMARY KEY,
-    filename    TEXT NOT NULL,
-    title       TEXT,
-    artist      TEXT,
-    duration_ms INTEGER NOT NULL,
-    analysed_at TEXT NOT NULL
+    file_hash            TEXT PRIMARY KEY,
+    filename             TEXT NOT NULL,
+    title                TEXT,
+    artist               TEXT,
+    duration_ms          INTEGER NOT NULL,
+    analysed_at          TEXT NOT NULL,
+    calibration_excluded INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS segments (
@@ -36,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_seg_lookup
     ON segments(file_hash, start_ms, end_ms);
 """
 
-_CURRENT_VERSION = 1
+_CURRENT_VERSION = 2
 
 _DEFAULT_PRESETS = [
     ("clean",   "Clean",            0),
@@ -59,11 +60,23 @@ def init_db(path: str) -> sqlite3.Connection:
         _seed(conn)
         conn.execute(
             "INSERT INTO schema_version(version, applied_at) VALUES (?, ?)",
-            (_CURRENT_VERSION, _utcnow()),
+            (_CURRENT_VERSION, utcnow()),
         )
         conn.commit()
+    elif row[0] < 2:
+        _migrate_v1_to_v2(conn)
 
     return conn
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    existing = [r[1] for r in conn.execute("PRAGMA table_info(tracks)").fetchall()]
+    if "calibration_excluded" not in existing:
+        conn.execute(
+            "ALTER TABLE tracks ADD COLUMN calibration_excluded INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute("UPDATE schema_version SET version = 2, applied_at = ?", (utcnow(),))
+    conn.commit()
 
 
 def _seed(conn: sqlite3.Connection) -> None:
@@ -73,5 +86,5 @@ def _seed(conn: sqlite3.Connection) -> None:
     )
 
 
-def _utcnow() -> str:
+def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()

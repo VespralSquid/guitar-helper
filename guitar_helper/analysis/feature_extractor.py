@@ -43,11 +43,14 @@ def _normalize_for_classification(raw: np.ndarray, sr: int) -> np.ndarray:
 
 class FeatureExtractor:
 
-    def __init__(self, hop_length: int = 512) -> None:
+    def __init__(self, hop_length: int = 512, use_hpss: bool = False) -> None:
         self._hop = hop_length
+        self._use_hpss = use_hpss
 
     def _stack_raw(self, y: np.ndarray, sr: int) -> np.ndarray:
         """Compute and stack raw (un-normalised) features into (24, n_frames)."""
+        if self._use_hpss:
+            y, _ = librosa.effects.hpss(y)
         h = self._hop
         flatness  = librosa.feature.spectral_flatness(y=y, hop_length=h)
         zcr       = librosa.feature.zero_crossing_rate(y=y, hop_length=h)

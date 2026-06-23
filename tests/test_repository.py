@@ -5,7 +5,6 @@ import pytest
 from guitar_helper.db.interfaces import Preset, Segment
 from tests.conftest import make_segment
 
-
 # =========================================================================
 # Presets
 # =========================================================================

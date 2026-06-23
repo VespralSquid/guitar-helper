@@ -1,10 +1,10 @@
+import os
 import sqlite3
 import tempfile
-import os
 
 import pytest
 
-from guitar_helper.db.schema import init_db, _DEFAULT_PRESETS, _CURRENT_VERSION
+from guitar_helper.db.schema import _CURRENT_VERSION, _DEFAULT_PRESETS, init_db
 
 
 @pytest.fixture

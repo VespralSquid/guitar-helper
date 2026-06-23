@@ -4,15 +4,14 @@ import numpy as np
 import pytest
 
 from guitar_helper.analysis.tone_classifier import (
-    ThresholdClassifier,
     TONE_LABELS,
-    _CONFIDENCE_FLOOR,
+    ThresholdClassifier,
 )
 
 
 @pytest.fixture
 def clf() -> ThresholdClassifier:
-    return ThresholdClassifier()
+    return ThresholdClassifier(calibration_path=None)
 
 
 def test_archetype_classifies_to_itself(clf):
@@ -45,6 +44,19 @@ def test_custom_archetypes():
     label, conf = clf.classify(np.zeros(24, dtype=np.float32))
     assert label == "clean"
     assert conf > 0.99
+
+
+def test_partial_calibration_merges_with_defaults(tmp_path):
+    import json
+
+    cal = tmp_path / "arch.json"
+    cal.write_text(json.dumps({"crunch": [0.0] * 24}))
+    clf = ThresholdClassifier(calibration_path=cal)
+
+    # Tones absent from the file keep their defaults instead of vanishing.
+    assert set(clf._archetypes) == set(ThresholdClassifier.DEFAULT_ARCHETYPES)
+    # The calibrated tone is overridden by the file.
+    assert clf._archetypes["crunch"].tolist() == [0.0] * 24
 
 
 def test_confidence_floor_triggers_other():

@@ -58,3 +58,11 @@ class ISegmentStore(ABC):
         duration_ms: int,
     ) -> None:
         """Insert track metadata if not already present (idempotent)."""
+
+    @abstractmethod
+    def set_calibration_excluded(self, file_hash: str, excluded: bool) -> None:
+        """Mark or unmark a track as excluded from calibration."""
+
+    @abstractmethod
+    def get_calibration_excluded(self, file_hash: str) -> bool:
+        """Return True if the track is excluded from calibration."""

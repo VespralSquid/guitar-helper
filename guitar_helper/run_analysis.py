@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from guitar_helper.analysis.pipeline import AnalysisPipeline
+from guitar_helper.analysis.source_separator import AudioSeparator, NullSeparator
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
 
@@ -31,6 +32,10 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=None, help="Force segment count (default: auto-detect)")
     parser.add_argument("--db", default="library.db", help="SQLite database path")
     parser.add_argument("--verbose", action="store_true", help="Print segmenter diagnostics")
+    parser.add_argument("--hpss", action="store_true", help="Isolate harmonic content before feature extraction")
+    parser.add_argument("--no-separate", action="store_true", help="Skip guitar source separation (analyse full mix)")
+    parser.add_argument("--stems-dir", default="stems", help="Directory for cached guitar stems")
+    parser.add_argument("--model-dir", default=None, help="Directory for cached separation models")
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -41,12 +46,22 @@ def main() -> None:
     print(f"Analysing: {path.name}")
     if args.k:
         print(f"  k={args.k} (forced)")
+    if args.hpss:
+        print("  HPSS enabled")
+    if args.no_separate:
+        print("  guitar separation disabled (full mix)")
+
+    separator = (
+        NullSeparator()
+        if args.no_separate
+        else AudioSeparator(cache_dir=args.stems_dir, model_dir=args.model_dir, verbose=args.verbose)
+    )
 
     conn = init_db(args.db)
     store = SQLiteSegmentStore(conn)
-    segments = AnalysisPipeline(store, verbose=args.verbose).run(
-        path, title=args.title, artist=args.artist, k=args.k
-    )
+    segments = AnalysisPipeline(
+        store, separator=separator, verbose=args.verbose, use_hpss=args.hpss
+    ).run(path, title=args.title, artist=args.artist, k=args.k)
 
     file_hash = segments[0].file_hash if segments else "—"
     print(f"\nfile_hash : {file_hash}")

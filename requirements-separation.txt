@@ -1,0 +1,44 @@
+# Optional: guitar source separation (htdemucs_6s via python-audio-separator).
+# Heavy stack (torch CPU + onnxruntime, ~2 GB). Kept OUT of requirements.txt so CI
+# and the base install stay light.
+#
+# IMPORTANT — Python 3.14 install is NOT a plain `pip install -r` (see notes below).
+# Follow the steps in order.
+#
+# --- Step 1: system dependency — ffmpeg (audio-separator hard-requires it on PATH) ---
+#   msys2:  C:\msys64\usr\bin\pacman -S --noconfirm mingw-w64-ucrt-x86_64-ffmpeg
+#           then ensure C:\msys64\ucrt64\bin is on PATH
+#   or:     winget install --id Gyan.FFmpeg -e
+#
+# --- Step 2: install these deps (all have cp314 wheels) ---
+beartype<0.19.0,>=0.18.5
+einops>=0.7
+julius>=0.2
+ml_collections
+numpy>=2
+onnx-weekly
+onnx2torch-py313>=1.6
+pydub>=0.25
+pyyaml
+requests>=2
+resampy>=0.4
+rotary-embedding-torch<0.7.0,>=0.6.1
+samplerate==0.1.0
+scipy<2.0.0,>=1.13.0
+six>=1.16
+soundfile>=0.12
+torch>=2.3
+tqdm
+onnxruntime>=1.17
+#
+# --- Step 3: install audio-separator WITHOUT its deps ---
+#   pip install --no-deps audio-separator
+#   (Its Windows dep `diffq-fixed` has no cp314 wheel and a broken sdist; it cannot
+#    build here. diffq is only used by *quantized* Demucs models — htdemucs_6s is not
+#    quantized — so it is not needed at runtime.)
+#
+# --- Step 4: satisfy the eager `import diffq` with a stub ---
+#   audio-separator's bundled Demucs imports diffq at module load even though it never
+#   calls it for htdemucs_6s. Drop a stub on the path so the import succeeds, e.g. a
+#   `diffq.py` exposing DiffQuantizer / UniformQuantizer / restore_quantized_state that
+#   raise NotImplementedError if ever invoked. (A copy lives in the venv during dev.)

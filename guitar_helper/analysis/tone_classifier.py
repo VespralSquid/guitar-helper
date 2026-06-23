@@ -66,7 +66,9 @@ class ThresholdClassifier(BaseToneClassifier):
             cal = Path(calibration_path) if calibration_path is not None else None
             if cal is not None and cal.exists():
                 with cal.open() as f:
-                    source = json.load(f)
+                    # Merge onto defaults so tones absent from the calibration file
+                    # keep their default archetype instead of being dropped entirely.
+                    source = {**self.DEFAULT_ARCHETYPES, **json.load(f)}
             else:
                 source = self.DEFAULT_ARCHETYPES
         self._archetypes = {k: np.asarray(v, dtype=np.float32) for k, v in source.items()}

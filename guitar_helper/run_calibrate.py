@@ -8,8 +8,10 @@ Reads all manually_corrected=1 segments from the DB, re-extracts their
 extract_for_classification() feature vectors from cached stems (or raw audio
 as fallback), computes the per-tone mean, and writes archetypes.json.
 
-After running, re-analyse all songs to pick up the new archetypes:
-    python -m guitar_helper.run_batch music\\ --reanalyze --no-separate
+After running, re-analyse all songs to pick up the new archetypes. Keep separation
+ON (the default) so analysis features come from the same stems the archetypes were
+calibrated on — do NOT pass --no-separate here:
+    python -m guitar_helper.run_batch music\\ --reanalyze
 """
 from __future__ import annotations
 
@@ -123,6 +125,7 @@ def main() -> None:
         FROM segments s
         JOIN tracks t ON s.file_hash = t.file_hash
         WHERE s.manually_corrected = 1
+          AND t.calibration_excluded = 0
         ORDER BY s.tone_label, s.file_hash
     """).fetchall()
 
@@ -158,8 +161,9 @@ def main() -> None:
     print(f"\nWrote {len(new_archetypes)} archetype(s) to {out_path}")
     print("Tones without enough labels will still use DEFAULT_ARCHETYPES as fallback.")
     print("\nNext steps:")
-    print("  1. Re-analyse all songs to apply new archetypes:")
-    print("     python -m guitar_helper.run_batch music\\ --reanalyze --no-separate")
+    print("  1. Re-analyse all songs to apply new archetypes (keep separation ON so")
+    print("     analysis features match the stem-calibrated archetypes):")
+    print("     python -m guitar_helper.run_batch music\\ --reanalyze")
     print("  2. Check results; label more segments if tones still mismatch.")
     print("  3. Re-run calibration to refine.")
 
