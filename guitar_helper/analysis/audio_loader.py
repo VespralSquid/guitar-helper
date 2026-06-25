@@ -50,6 +50,21 @@ class AudioLoader:
         y, sr_out = librosa.load(str(Path(path)), sr=sr, mono=True)
         return y.astype(np.float32, copy=False), sr_out
 
+    def decode(self, path: str | Path) -> tuple[np.ndarray, int]:
+        """Decode the whole file for playback at its native sample rate.
+
+        Returns (data, sr) where data is float32 shaped (frames, channels) —
+        the layout sounddevice's output stream expects. Preserves stereo and
+        original sample rate for listening fidelity (analysis uses load_mono).
+        """
+        y, sr_out = librosa.load(str(Path(path)), sr=None, mono=False)
+        data = np.asarray(y, dtype=np.float32)
+        if data.ndim == 1:
+            data = data[:, np.newaxis]
+        else:
+            data = data.T  # librosa gives (channels, frames); sounddevice wants (frames, channels)
+        return np.ascontiguousarray(data), int(sr_out)
+
     # ------------------------------------------------------------------
 
     @staticmethod
