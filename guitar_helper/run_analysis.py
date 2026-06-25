@@ -12,8 +12,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from guitar_helper.analysis.pipeline import AnalysisPipeline
+from guitar_helper.analysis.pipeline import AnalysisPipeline, ManualCorrectionsExistError
 from guitar_helper.analysis.source_separator import AudioSeparator, NullSeparator
+from guitar_helper.analysis.tone_classifier import ThresholdClassifier
+from guitar_helper.config import add_config_args, config_from_args
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
 
@@ -30,13 +32,14 @@ def main() -> None:
     parser.add_argument("--title", default=None)
     parser.add_argument("--artist", default=None)
     parser.add_argument("--k", type=int, default=None, help="Force segment count (default: auto-detect)")
-    parser.add_argument("--db", default="library.db", help="SQLite database path")
     parser.add_argument("--verbose", action="store_true", help="Print segmenter diagnostics")
     parser.add_argument("--hpss", action="store_true", help="Isolate harmonic content before feature extraction")
     parser.add_argument("--no-separate", action="store_true", help="Skip guitar source separation (analyse full mix)")
-    parser.add_argument("--stems-dir", default="stems", help="Directory for cached guitar stems")
-    parser.add_argument("--model-dir", default=None, help="Directory for cached separation models")
+    parser.add_argument("--discard-corrections", action="store_true",
+                        help="Overwrite this track's manual corrections (default: refuse)")
+    add_config_args(parser)
     args = parser.parse_args()
+    cfg = config_from_args(args)
 
     path = Path(args.path)
     if not path.exists():
@@ -51,17 +54,27 @@ def main() -> None:
     if args.no_separate:
         print("  guitar separation disabled (full mix)")
 
+    model_dir = str(cfg.model_dir) if cfg.model_dir else None
     separator = (
         NullSeparator()
         if args.no_separate
-        else AudioSeparator(cache_dir=args.stems_dir, model_dir=args.model_dir, verbose=args.verbose)
+        else AudioSeparator(cache_dir=str(cfg.stems_dir), model_dir=model_dir, verbose=args.verbose)
     )
 
-    conn = init_db(args.db)
+    conn = init_db(str(cfg.db_path))
     store = SQLiteSegmentStore(conn)
-    segments = AnalysisPipeline(
-        store, separator=separator, verbose=args.verbose, use_hpss=args.hpss
-    ).run(path, title=args.title, artist=args.artist, k=args.k)
+    classifier = ThresholdClassifier(calibration_path=cfg.archetypes_path)
+    try:
+        segments = AnalysisPipeline(
+            store, classifier=classifier, separator=separator,
+            verbose=args.verbose, use_hpss=args.hpss,
+        ).run(
+            path, title=args.title, artist=args.artist, k=args.k,
+            discard_corrections=args.discard_corrections,
+        )
+    except ManualCorrectionsExistError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     file_hash = segments[0].file_hash if segments else "—"
     print(f"\nfile_hash : {file_hash}")
@@ -76,7 +89,7 @@ def main() -> None:
             f"{corrected}"
         )
 
-    print(f"\nStored in {args.db}.")
+    print(f"\nStored in {cfg.db_path}.")
     print(f"To correct: python -m guitar_helper.run_correction {file_hash}")
 
 

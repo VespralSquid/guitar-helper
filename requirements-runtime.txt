@@ -1,0 +1,13 @@
+# Runtime-only MIDI backend — NOT installed by CI.
+#
+# python-rtmidi is the rtmidi backend mido uses to open a real MIDI port. It has
+# no cp314 binary wheel (any version), so pip compiles it from source via meson,
+# which needs MSVC. The local dev environment (Windows 11, py3.14) is the deploy
+# target and already builds it, so this is verified there rather than in CI.
+#
+# Tests substitute MockMidiPort and never import this; MidoPort imports mido
+# (pure Python) and only requires this backend when actually opening a port at
+# runtime (fail-fast if loopMIDI/the backend is absent).
+#
+# Install for live MIDI playback:  pip install -r requirements-runtime.txt
+python-rtmidi

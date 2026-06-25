@@ -8,8 +8,13 @@ import numpy as np
 
 from .feature_extractor import N_FEATURES
 
-TONE_LABELS: tuple[str, ...] = ("clean", "edge", "crunch", "metal", "ambient", "other")
+TONE_LABELS: tuple[str, ...] = ("clean", "edge", "overdrive", "crunch", "metal", "other")
 _CONFIDENCE_FLOOR = 0.2
+# Normalized clf-space RMS (raw rms / 0.25) below this routes a segment straight to
+# 'other'. A near-silent stem reads as low energy regardless of tone; without this gate
+# it misclassifies as 'clean' (EXP-001: 12/14 near-silent segments). Tuned on the
+# labeled library — see docs/experiments/EXP-001-results.md.
+_RMS_FLOOR = 0.02
 
 # Row layout: [0]=flatness [1]=zcr [2]=rms [3]=centroid [4:11]=contrast [11:24]=mfcc
 _F, _Z, _R, _C = 0, 1, 2, 3
@@ -48,18 +53,21 @@ class ThresholdClassifier(BaseToneClassifier):
     # All values are physics-motivated estimates — run a calibration pass after gathering labelled songs.
     DEFAULT_ARCHETYPES: dict[str, list[float]] = {
         # flatness  zcr    rms    centroid  contrast
-        "clean":   _archetype(0.12, 0.22, 0.30, 0.19, contrast=0.75),
-        "edge":    _archetype(0.20, 0.28, 0.35, 0.22, contrast=0.67),
-        "crunch":  _archetype(0.40, 0.44, 0.425, 0.275, contrast=0.46),
+        "clean":     _archetype(0.12, 0.22, 0.30, 0.19, contrast=0.75),
+        "edge":      _archetype(0.20, 0.28, 0.35, 0.22, contrast=0.67),
+        # overdrive: midpoint between edge and crunch (estimate; calibrate from labels).
+        "overdrive": _archetype(0.30, 0.36, 0.39, 0.25, contrast=0.56),
+        "crunch":    _archetype(0.40, 0.44, 0.425, 0.275, contrast=0.46),
         "metal":   _archetype(0.60, 0.60, 0.55, 0.36, contrast=0.25),
-        "ambient": _archetype(0.10, 0.10, 0.15, 0.13, contrast=0.88),
     }
 
     def __init__(
         self,
         archetypes: dict[str, np.ndarray] | None = None,
         calibration_path: str | Path | None = "archetypes.json",
+        rms_floor: float = _RMS_FLOOR,
     ) -> None:
+        self._rms_floor = rms_floor
         if archetypes is not None:
             source: dict = archetypes
         else:
@@ -75,6 +83,8 @@ class ThresholdClassifier(BaseToneClassifier):
 
     def classify(self, feature_vector: np.ndarray) -> tuple[str, float]:
         vec = np.asarray(feature_vector, dtype=np.float32)
+        if vec[_R] < self._rms_floor:
+            return "other", 0.0
         dists = {label: float(np.linalg.norm(vec - arch)) for label, arch in self._archetypes.items()}
         best_label = min(dists, key=dists.__getitem__)
         worst_dist = max(dists.values())

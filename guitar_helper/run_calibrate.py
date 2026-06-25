@@ -1,12 +1,13 @@
 """Calibration tool: compute archetype vectors from manually-corrected segments.
 
 Usage:
-    python -m guitar_helper.run_calibrate [--db library.db] [--stems-dir stems]
-                                           [--music-dir music] [--out archetypes.json]
+    python -m guitar_helper.run_calibrate [--root DIR] [--db PATH] [--stems-dir DIR]
+                                           [--library-root DIR] [--archetypes PATH]
 
 Reads all manually_corrected=1 segments from the DB, re-extracts their
 extract_for_classification() feature vectors from cached stems (or raw audio
-as fallback), computes the per-tone mean, and writes archetypes.json.
+located by content hash under --library-root), computes the per-tone mean,
+and writes archetypes.json.
 
 After running, re-analyse all songs to pick up the new archetypes. Keep separation
 ON (the default) so analysis features come from the same stems the archetypes were
@@ -25,6 +26,8 @@ import numpy as np
 
 from guitar_helper.analysis.audio_loader import AudioLoader
 from guitar_helper.analysis.feature_extractor import FeatureExtractor
+from guitar_helper.analysis.file_locator import locate
+from guitar_helper.config import add_config_args, config_from_args
 from guitar_helper.db.schema import init_db
 
 _HOP = 512
@@ -36,19 +39,16 @@ def _stems_path(stems_dir: Path, file_hash: str) -> Path:
 
 def _find_audio(
     file_hash: str,
-    filename: str,
+    source_path: str | None,
     stems_dir: Path,
-    music_dir: Path | None,
+    library_root: Path | None,
+    loader: AudioLoader,
 ) -> Path | None:
-    """Return the best available audio path: stem → music_dir fallback."""
+    """Return the best available audio path: stem → stored/re-hashed source."""
     stem = _stems_path(stems_dir, file_hash)
     if stem.exists():
         return stem
-    if music_dir is not None:
-        candidate = music_dir / filename
-        if candidate.exists():
-            return candidate
-    return None
+    return locate(file_hash, source_path, library_root, loader)
 
 
 def _collect_tone_vectors(
@@ -56,7 +56,7 @@ def _collect_tone_vectors(
     loader: AudioLoader,
     extractor: FeatureExtractor,
     stems_dir: Path,
-    music_dir: Path | None,
+    library_root: Path | None,
 ) -> dict[str, list[np.ndarray]]:
     """Re-extract classification features for each labeled segment and group by tone."""
     tone_vectors: dict[str, list[np.ndarray]] = defaultdict(list)
@@ -64,12 +64,12 @@ def _collect_tone_vectors(
     feature_cache: dict[str, np.ndarray] = {}
     missing: set[str] = set()
 
-    for _, file_hash, start_ms, end_ms, tone_label, filename in rows:
+    for _, file_hash, start_ms, end_ms, tone_label, filename, source_path in rows:
         if tone_label == "other" or file_hash in missing:
             continue
 
         if file_hash not in audio_cache:
-            audio_path = _find_audio(file_hash, filename, stems_dir, music_dir)
+            audio_path = _find_audio(file_hash, source_path, stems_dir, library_root, loader)
             if audio_path is None:
                 print(f"  WARNING: no audio found for {filename} ({file_hash[:12]}...) — skipping")
                 missing.add(file_hash)
@@ -104,6 +104,10 @@ def _build_archetypes(
         if n < min_segments:
             print(f"  {tone:<10}  {n:>8}  SKIPPED (< {min_segments} segments, needs more labels)")
         else:
+            # Cross-segment mean. EXP-001 favored median to suppress silent-segment
+            # outliers, but with those mislabels fixed (now 'other') the clean-data
+            # LOOCV prefers mean (macro-F1 0.693 vs 0.660). Switch to median only if
+            # future labels reintroduce outlier contamination.
             archetypes[tone] = np.mean(vecs, axis=0).astype(np.float64).tolist()
             print(f"  {tone:<10}  {n:>8}  OK")
     return archetypes
@@ -111,17 +115,16 @@ def _build_archetypes(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Calibrate tone archetypes from labeled segments.")
-    parser.add_argument("--db", default="library.db")
-    parser.add_argument("--stems-dir", default="stems", help="Guitar stem cache directory")
-    parser.add_argument("--music-dir", default="music", help="Fallback audio folder when stem missing")
-    parser.add_argument("--out", default="archetypes.json", help="Output archetypes file")
     parser.add_argument("--min-segments", type=int, default=3,
                         help="Minimum labeled segments required per tone (default: 3)")
+    add_config_args(parser)
     args = parser.parse_args()
+    cfg = config_from_args(args)
 
-    conn = init_db(args.db)
+    conn = init_db(str(cfg.db_path))
     rows = conn.execute("""
-        SELECT s.id, s.file_hash, s.start_ms, s.end_ms, s.tone_label, t.filename
+        SELECT s.id, s.file_hash, s.start_ms, s.end_ms, s.tone_label,
+               t.filename, t.source_path
         FROM segments s
         JOIN tracks t ON s.file_hash = t.file_hash
         WHERE s.manually_corrected = 1
@@ -140,8 +143,8 @@ def main() -> None:
         rows,
         AudioLoader(),
         FeatureExtractor(hop_length=_HOP),
-        Path(args.stems_dir),
-        Path(args.music_dir) if args.music_dir else None,
+        cfg.stems_dir,
+        cfg.library_root,
     )
 
     if not tone_vectors:
@@ -154,7 +157,7 @@ def main() -> None:
         print("\nNo tones met the minimum segment threshold. Label more segments and retry.")
         sys.exit(1)
 
-    out_path = Path(args.out)
+    out_path = cfg.archetypes_path
     with out_path.open("w") as f:
         json.dump(new_archetypes, f, indent=2)
 

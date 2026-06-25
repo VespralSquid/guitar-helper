@@ -24,7 +24,7 @@ class AudioLoader:
         if not path.exists():
             raise FileNotFoundError(path)
 
-        file_hash = self._hash_file(path)
+        file_hash = self.hash_file(path)
         suffix = path.suffix.lower()
 
         if suffix in _SUPPORTED_NATIVE:
@@ -53,7 +53,7 @@ class AudioLoader:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _hash_file(path: Path) -> str:
+    def hash_file(path: str | Path) -> str:
         h = hashlib.sha256()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(65536), b""):

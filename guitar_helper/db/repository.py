@@ -118,14 +118,22 @@ class SQLiteSegmentStore(ISegmentStore):
         title: str | None,
         artist: str | None,
         duration_ms: int,
+        source_path: str | None = None,
     ) -> None:
         self._conn.execute(
             """
-            INSERT OR IGNORE INTO tracks
-                (file_hash, filename, title, artist, duration_ms, analysed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tracks
+                (file_hash, filename, title, artist, duration_ms, analysed_at, source_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(file_hash) DO UPDATE SET
+                filename    = excluded.filename,
+                title       = excluded.title,
+                artist      = excluded.artist,
+                duration_ms = excluded.duration_ms,
+                analysed_at = excluded.analysed_at,
+                source_path = excluded.source_path
             """,
-            (file_hash, filename, title, artist, duration_ms, utcnow()),
+            (file_hash, filename, title, artist, duration_ms, utcnow(), source_path),
         )
         self._conn.commit()
 

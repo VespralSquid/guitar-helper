@@ -36,11 +36,13 @@ When delegating work, use the `Agent` tool with the `model` parameter:
 | Tone | PC |
 |---|---|
 | clean | 0 |
-| edge | 4 |
 | crunch | 1 |
 | metal | 2 |
-| ambient | 3 |
+| edge | 3 |
+| overdrive | 4 |
 | other | -1 (no dispatch) |
+
+`overdrive` (PC4) is a mid-gain tone between edge and crunch (schema v6). `ambient` is deferred — removed from presets/classifier (schema v4); `edge` moved from PC4→PC3 (v5) so PCs 0-3 are contiguous. Re-add ambient later as a custom preset on a free PC.
 
 ## Debug Documentation
 
@@ -102,3 +104,4 @@ guitar_helper/
 - ffmpeg NOT installed — WAV/FLAC/OGG work; MP3/AAC blocked until ffmpeg is added
 - ruff linting: `python -m ruff check guitar_helper/`
 - CI: GitHub Actions on `windows-latest`, runs ruff + pytest on push to main
+- Do not mention the use of claude and advertising phrases such as "co-authored by Claude" and similar.

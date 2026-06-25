@@ -14,13 +14,14 @@ def test_get_presets_returns_all_defaults(store):
     presets = store.get_presets()
     assert len(presets) == 6
     labels = {p.tone_label for p in presets}
-    assert labels == {"clean", "edge", "crunch", "metal", "ambient", "other"}
+    assert labels == {"clean", "edge", "overdrive", "crunch", "metal", "other"}
+    assert "ambient" not in labels
     by_label = {p.tone_label: p for p in presets}
     assert by_label["clean"].pc_number == 0
-    assert by_label["edge"].pc_number == 4
     assert by_label["crunch"].pc_number == 1
     assert by_label["metal"].pc_number == 2
-    assert by_label["ambient"].pc_number == 3
+    assert by_label["edge"].pc_number == 3
+    assert by_label["overdrive"].pc_number == 4
     assert by_label["other"].pc_number == -1
 
 
@@ -85,12 +86,12 @@ def test_save_segments_replaces_existing(store, track_hash):
     store.save_segments(track_hash, [make_segment(track_hash, 0, 3000)])
     store.save_segments(track_hash, [
         make_segment(track_hash, 0, 1000, tone_label="metal"),
-        make_segment(track_hash, 1000, 2000, tone_label="ambient"),
+        make_segment(track_hash, 1000, 2000, tone_label="clean"),
     ])
     results = store.get_segments(track_hash)
     assert len(results) == 2
     assert results[0].tone_label == "metal"
-    assert results[1].tone_label == "ambient"
+    assert results[1].tone_label == "clean"
 
 
 # Test 15
@@ -220,3 +221,46 @@ def test_save_segments_unknown_file_hash_raises(store):
     seg = make_segment("no_such_hash", 0, 5000)
     with pytest.raises(sqlite3.IntegrityError):
         store.save_segments("no_such_hash", [seg])
+
+
+# =========================================================================
+# save_track — source_path persistence
+# =========================================================================
+
+def _track_row(db, file_hash):
+    return db.execute(
+        "SELECT filename, title, artist, duration_ms, source_path, calibration_excluded "
+        "FROM tracks WHERE file_hash = ?",
+        (file_hash,),
+    ).fetchone()
+
+
+# Test 27
+def test_save_track_persists_source_path(store, db):
+    store.save_track("h1", "song.wav", "Song", "Artist", 60000, source_path="/abs/song.wav")
+    row = _track_row(db, "h1")
+    assert row[0] == "song.wav"
+    assert row[4] == "/abs/song.wav"
+
+
+# Test 28 — re-analysis of a moved file refreshes the stored path (upsert, not no-op)
+def test_save_track_upsert_updates_moved_path(store, db):
+    store.save_track("h1", "song.wav", "Song", "Artist", 60000, source_path="/old/song.wav")
+    store.save_track("h1", "song.wav", "Song", "Artist", 60000, source_path="/new/song.wav")
+    rows = db.execute("SELECT COUNT(*) FROM tracks WHERE file_hash = 'h1'").fetchone()[0]
+    assert rows == 1  # no duplicate row
+    assert _track_row(db, "h1")[4] == "/new/song.wav"
+
+
+# Test 29 — upsert must not clobber a user's calibration exclusion flag
+def test_save_track_upsert_preserves_calibration_excluded(store, db):
+    store.save_track("h1", "song.wav", None, None, 60000, source_path="/a.wav")
+    store.set_calibration_excluded("h1", True)
+    store.save_track("h1", "song.wav", None, None, 60000, source_path="/b.wav")
+    assert _track_row(db, "h1")[5] == 1
+
+
+# Test 30 — source_path is optional
+def test_save_track_source_path_defaults_null(store, db):
+    store.save_track("h1", "song.wav", None, None, 60000)
+    assert _track_row(db, "h1")[4] is None

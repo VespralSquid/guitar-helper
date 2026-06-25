@@ -4,8 +4,10 @@ venv/
 env/
 
 # Database (user-specific library, not committed)
+# (includes local pre-change DB backups: library.db.bak-*)
 *.db
 *.sqlite
+library.db.bak-*
 
 # Python bytecode
 __pycache__/
@@ -46,11 +48,8 @@ music/
 stems/
 audio-separator-models/
 
-# Local tooling / experiments (kept out of the repo)
+# Local tooling (kept out of the repo)
 .claude/
-docs/experiments/
-guitar_helper/experiments/
-tests/test_calibration_eval.py
 
-# Experiment outputs (EXP-NNN harness results, not committed)
+# Experiment outputs (EXP-NNN harness raw output, regenerable — not committed)
 results/

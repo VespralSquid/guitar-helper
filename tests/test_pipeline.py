@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from guitar_helper.analysis.pipeline import AnalysisPipeline
+import pytest
+
+from guitar_helper.analysis.audio_loader import AudioLoader
+from guitar_helper.analysis.pipeline import AnalysisPipeline, ManualCorrectionsExistError
 from guitar_helper.analysis.source_separator import ISourceSeparator
 from guitar_helper.analysis.tone_classifier import TONE_LABELS
 from guitar_helper.db.interfaces import ISegmentStore, Preset, Segment
@@ -13,8 +16,8 @@ class MockStore(ISegmentStore):
         self._tracks: list[tuple] = []
         self._segments: list[Segment] = []
 
-    def save_track(self, file_hash, filename, title, artist, duration_ms) -> None:
-        self._tracks.append((file_hash, filename, title, artist, duration_ms))
+    def save_track(self, file_hash, filename, title, artist, duration_ms, source_path=None) -> None:
+        self._tracks.append((file_hash, filename, title, artist, duration_ms, source_path))
 
     def save_segments(self, file_hash, segments) -> None:
         self._segments = [s for s in segments]
@@ -84,6 +87,39 @@ def test_pipeline_segments_are_contiguous(make_wav):
     segments = AnalysisPipeline(store).run(path)
     for a, b in zip(segments[:-1], segments[1:]):
         assert a.end_ms == b.start_ms
+
+
+def _seed_corrected(store: MockStore, file_hash: str) -> None:
+    store._segments = [Segment(
+        id=1, file_hash=file_hash, start_ms=0, end_ms=1000,
+        tone_label="crunch", confidence=1.0, manually_corrected=True,
+    )]
+
+
+def test_pipeline_refuses_to_overwrite_corrections(make_wav):
+    path = make_wav(duration_s=3.0)
+    _, file_hash = AudioLoader().load(path)
+    store = MockStore()
+    _seed_corrected(store, file_hash)
+
+    with pytest.raises(ManualCorrectionsExistError):
+        AnalysisPipeline(store).run(path)
+
+    # ground truth left untouched
+    assert len(store._segments) == 1
+    assert store._segments[0].manually_corrected
+
+
+def test_pipeline_discard_corrections_overwrites(make_wav):
+    path = make_wav(duration_s=3.0)
+    _, file_hash = AudioLoader().load(path)
+    store = MockStore()
+    _seed_corrected(store, file_hash)
+
+    segments = AnalysisPipeline(store).run(path, discard_corrections=True)
+
+    assert len(segments) >= 1
+    assert not any(s.manually_corrected for s in store._segments)
 
 
 class RecordingSeparator(ISourceSeparator):

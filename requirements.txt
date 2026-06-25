@@ -8,7 +8,8 @@ mutagen
 # Tier 2 — Playback Engine & MIDI
 sounddevice
 mido
-python-rtmidi
+# python-rtmidi is mido's runtime backend (no cp314 wheel → source build); see
+# requirements-runtime.txt. Tests use MockMidiPort, so CI does not install it.
 
 # Tier 3 — Presentation
 PySide6

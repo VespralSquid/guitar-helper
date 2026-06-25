@@ -40,10 +40,29 @@ def test_far_vector_returns_other(clf):
 
 def test_custom_archetypes():
     custom = {"clean": np.zeros(24, dtype=np.float32)}
-    clf = ThresholdClassifier(archetypes=custom)
+    # rms_floor=0 isolates archetype matching from the silence gate (vector is all-zeros).
+    clf = ThresholdClassifier(archetypes=custom, rms_floor=0.0)
     label, conf = clf.classify(np.zeros(24, dtype=np.float32))
     assert label == "clean"
     assert conf > 0.99
+
+
+def test_silence_gate_routes_low_rms_to_other():
+    clf = ThresholdClassifier(calibration_path=None)
+    # A clean-shaped vector but near-silent RMS (index 2) must be gated to 'other'.
+    vec = np.asarray(clf.DEFAULT_ARCHETYPES["clean"], dtype=np.float32).copy()
+    vec[2] = 0.0
+    label, conf = clf.classify(vec)
+    assert label == "other"
+    assert conf == pytest.approx(0.0)
+
+
+def test_silence_gate_disabled_with_zero_floor():
+    clf = ThresholdClassifier(calibration_path=None, rms_floor=0.0)
+    vec = np.asarray(clf.DEFAULT_ARCHETYPES["clean"], dtype=np.float32).copy()
+    vec[2] = 0.0
+    label, _ = clf.classify(vec)
+    assert label != "other"
 
 
 def test_partial_calibration_merges_with_defaults(tmp_path):

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from guitar_helper.config import add_config_args, config_from_args
 from guitar_helper.correction.cli import SegmentCorrectionTool
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
@@ -16,10 +17,11 @@ from guitar_helper.db.schema import init_db
 def main() -> None:
     parser = argparse.ArgumentParser(description="Correct segments for a track.")
     parser.add_argument("file_hash", help="SHA-256 hash of the audio file (from run_analysis output)")
-    parser.add_argument("--db", default="library.db")
+    add_config_args(parser)
     args = parser.parse_args()
+    cfg = config_from_args(args)
 
-    conn = init_db(args.db)
+    conn = init_db(str(cfg.db_path))
     store = SQLiteSegmentStore(conn)
 
     if not store.get_segments(args.file_hash):

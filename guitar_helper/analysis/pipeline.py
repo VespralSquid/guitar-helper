@@ -13,6 +13,21 @@ from .tone_classifier import BaseToneClassifier, ThresholdClassifier
 _HOP = 512
 
 
+class ManualCorrectionsExistError(Exception):
+    """Raised when re-analysis would overwrite human-verified segments.
+
+    Manual corrections are ground truth (calibration depends on them). Pass
+    discard_corrections=True to overwrite them deliberately.
+    """
+
+    def __init__(self, file_hash: str) -> None:
+        self.file_hash = file_hash
+        super().__init__(
+            f"Track {file_hash[:12]} has manually-corrected segments; "
+            f"re-analysis would erase them. Use discard_corrections to override."
+        )
+
+
 class AnalysisPipeline:
 
     def __init__(
@@ -36,10 +51,15 @@ class AnalysisPipeline:
         title: str | None = None,
         artist: str | None = None,
         k: int | None = None,
+        discard_corrections: bool = False,
     ) -> list[Segment]:
         path = Path(path)
 
         duration_ms, file_hash = self._loader.load(path)
+        if not discard_corrections and any(
+            s.manually_corrected for s in self._store.get_segments(file_hash)
+        ):
+            raise ManualCorrectionsExistError(file_hash)
         clf_path = self._separator.separate_guitar(path, file_hash)
         # Guitar stem drives both segmentation and classification (full mix when
         # separation is disabled), so boundaries track guitar-tone changes.
@@ -68,6 +88,8 @@ class AnalysisPipeline:
                 manually_corrected=False,
             ))
 
-        self._store.save_track(file_hash, path.name, title, artist, duration_ms)
+        self._store.save_track(
+            file_hash, path.name, title, artist, duration_ms, str(path.resolve())
+        )
         self._store.save_segments(file_hash, segments)
         return segments

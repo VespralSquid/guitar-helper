@@ -56,8 +56,9 @@ class ISegmentStore(ABC):
         title: str | None,
         artist: str | None,
         duration_ms: int,
+        source_path: str | None = None,
     ) -> None:
-        """Insert track metadata if not already present (idempotent)."""
+        """Insert track metadata, refreshing it (incl. source_path) on re-analysis."""
 
     @abstractmethod
     def set_calibration_excluded(self, file_hash: str, excluded: bool) -> None:
