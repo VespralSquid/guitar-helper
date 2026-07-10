@@ -46,6 +46,9 @@ class MockStore(ISegmentStore):
     def get_calibration_excluded(self, file_hash) -> bool:
         return False
 
+    def list_tracks(self):
+        return []
+
 
 def test_pipeline_run_produces_segments(make_wav):
     path = make_wav(duration_s=3.0)

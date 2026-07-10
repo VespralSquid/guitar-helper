@@ -1,26 +1,15 @@
 # Save State — Guitar Helper
-_Last updated: 2026-06-25_
+_Last updated: 2026-07-08_
 
-Status: **Phase 1 + 2 DONE. Phase 3 readiness DONE. Phase 3 (Playback + MIDI) DONE** (branch `phase3-readiness`, NOT pushed). Next: Phase 4 UI.
+Status: **Phase 1 + 2 DONE. Phase 3 (Playback + MIDI) DONE. Phase 4 UI M1-M3 DONE** (branch `phase3-readiness`, NOT pushed). Next: Phase 4 M4/M5.
 
 ---
 
-## Phase 1 + 2 (DONE) — crucial facts only
-- Tiers: Analysis (offline) → Playback+MIDI (Phase 3) → UI (Phase 4). Fully offline.
-- DB layer, AudioLoader, FeatureExtractor (24-feat), Segmenter (cosine auto-k), ThresholdClassifier, AnalysisPipeline, source_separator, correction CLI, 4 run_* CLIs — all built.
-- **Stem pipeline:** separate guitar stem → extract features from the STEM for BOTH segmentation and classification. Do NOT analyse full mix against stem-calibrated archetypes (domain mismatch — the old `--no-separate` bug). Stems cached `stems/<hash>_guitar.wav`.
-- Classifier auto-loads `archetypes.json`, merging onto `DEFAULT_ARCHETYPES` (tones absent from the file keep their default).
-- ISSUE-001 (k=1), ISSUE-002 (per-song norm), ISSUE-003 (edge/crunch overlap) — all RESOLVED. ISSUE-003 finally closed by clean labels + the `overdrive` tone (confusion now 0).
-- Reports: `docs/phase2-calibration-report.md`, `docs/debug/ISSUE-00{1,2,3}`.
+## Phase 1 + 2 (DONE)
+- Tiers: Analysis (offline) → Playback+MIDI → UI. Fully offline, Python + SQLite.
+- DB, AudioLoader, FeatureExtractor (24-feat), Segmenter (cosine auto-k), ThresholdClassifier, AnalysisPipeline, stem separation, correction CLI, 4 run_* CLIs — all built + tested.
+- **Stem pipeline:** extract features from guitar STEM (not full mix) for segmentation + classification. ISSUE-001/002/003 RESOLVED. `overdrive` tone added (edge/crunch confusion → 0).
 
-## Phase 3 readiness (DONE) — see `docs/phase3-readiness-report.md`
-- **CI gate:** `python-rtmidi` (no cp314 wheel → source build) moved to `requirements-runtime.txt`; CI installs only `requirements.txt`. Tests use `MockMidiPort`; `mido` (pure Python) stays.
-- **Schema now v6.** Migrations run via a cumulative version loop (`_apply_migrations` + `_MIGRATIONS`), not an elif ladder. v2 calibration_excluded · v3 source_path · v4 ambient removed · v5 edge PC4→PC3 · v6 overdrive added.
-- **File locator:** `tracks.source_path` (absolute) persisted; `save_track` upserts (refreshes moved paths, keeps `calibration_excluded`). `analysis/file_locator.py:locate()` re-locates by content hash. `AudioLoader.hash_file` public.
-- **Config:** `config.py:AppConfig` owns all resource paths from one `root` (explicit > `GUITAR_HELPER_HOME` > CWD). 4 CLIs share `add_config_args`/`config_from_args`. Backward-compatible (CWD default).
-- **Silence gate:** `tone_classifier` routes low normalized-RMS (`rms_floor`, idx 2) straight to `other`.
-- **Calibration statistic = MEAN** (run_calibrate). EXP-001 picked median, but on the re-labeled clean data mean wins (macro-F1 0.693 vs 0.660); median was an artifact of silent mislabels. Median is the documented fallback for noisy future data.
-- 106 tests, ruff clean. Experiments (`guitar_helper/experiments/`, `docs/experiments/`, synthetic test) now committed; `results/` + `library.db.bak-*` gitignored.
 
 ## CRITICAL incident — calibration labels lost & protected
 - The original 129 manual labels were WIPED by a re-analysis (2026-06-19 reset `manually_corrected`→0). Unrecoverable: OneDrive version history only had post-wipe copies; `*.db` is gitignored. Only `archetypes.json` survived (in git).
@@ -34,14 +23,27 @@ Status: **Phase 1 + 2 DONE. Phase 3 readiness DONE. Phase 3 (Playback + MIDI) DO
 - library.db: 9 tracks, 129 segments, all verified ground truth, schema v6.
 
 ## Phase 3 (Playback + MIDI) DONE
-- New pkgs: `guitar_helper/midi/` (IMidiPort, MockMidiPort, MidoPort) + `guitar_helper/playback/` (AudioBuffer, PositionTracker, PlaybackEngine, SegmentLookup, VisualizationBridge, MidiDispatcher). Composition root `guitar_helper/application.py`; CLI `run_playback.py`.
-- **MidoPort** opens output port `'loopMIDI Port 1'` (our app SENDS; Ableton receives). Fail-fast `MidiPortNotFoundError` if absent. Channel 0 default. Verified live: PC0-4 switch Archetype Nolly presets.
-- **AudioLoader.decode()** added: native-sr STEREO, float32 (frames, channels) for sounddevice (load_mono stays analysis-only). AudioBuffer wraps it.
-- **SegmentLookup snapshots segments at construction (in-memory bisect), does NOT query the DB per-tick.** Critical: SQLite conn is single-thread; the dispatcher runs on its own thread. Live test initially crashed (cross-thread sqlite) → fixed by the snapshot. Regression test `test_dispatch_loop_runs_on_its_own_thread`.
-- **MidiDispatcher**: own thread polls PositionTracker (~50ms), lookahead 75ms (fire when pos+lookahead >= boundary), dispatch only when PC changes vs `_last_pc`; `other`(PC-1) holds + logs, no dispatch; PCs from presets table. `reset()` clears `_last_tone` after seek.
-- **PlaybackEngine** callback strictly non-blocking: copies chunk, advances frame, mirrors PositionTracker, `put_nowait` to viz queue (drop on full). Holds NO store/port (structural invariant test). play/pause/seek(clamped)/stop.
-- Tests: 133 passing (was 106; +27 Phase 3), ruff clean. MidoPort fail-fast test `importorskip("rtmidi")` so CI skips it.
-- Live E2E (carry_on_my_wayward_son): other@98s held, PC0@99.9s, PC4@113s, PC0@124.5s — correct, on-change-only.
+- **Schema v6** + migrations loop. File locator re-finds moved tracks by hash. Silence gate routes low RMS to `other`. Calibration = mean.
+- **CI:** `python-rtmidi` → `requirements-runtime.txt`. CI uses `requirements.txt` only; tests use `MockMidiPort`. pytest-qt added.
+- **Pkgs:** `guitar_helper/midi/` (IMidiPort, MockMidiPort, MidoPort) + `guitar_helper/playback/` (AudioBuffer, PositionTracker, PlaybackEngine, SegmentLookup, VisualizationBridge, MidiDispatcher). Composition root `guitar_helper/application.py`; CLI `run_playback.py`.
+- **Key design:** SegmentLookup snapshots at construction (in-memory bisect, not per-tick DB queries). MidiDispatcher own thread, 75ms lookahead, on-change-only dispatch from presets table. PlaybackEngine callback strictly non-blocking.
+- **MidoPort** opens `'loopMIDI Port 1'` (app SENDS, host receives). App-side dispatch verified correct (PCs logged: carry_on_my_wayward_son shows other@98s, PC0@99.9s, PC4@113s, PC0@124.5s). **Live preset switching NOT yet working — ISSUE-004 OPEN (plugin-side).**
+- Tests: 133 passing, ruff clean. MidoPort test skipped in CI (`importorskip("rtmidi")`).
+
+## Phase 4 UI M1-M3 (DONE) — Next: M4/M5
+- **DB layer extended:** Track dataclass + list_tracks() (LEFT JOIN segments for correction-progress, zero-segment tracks included). Schema still v6.
+- **UI package built:** `guitar_helper/ui/` — theme.py (colors/QSS/sizes, zero assets, icon() → None, callers fallback to text), controllers.py (PlaybackController wraps Application, owns loop-current-segment logic), transport.py (TransportControls widget), panels/library_panel.py (track list via list_tracks), state/editor_state.py (Qt-free EditorState: load_track/clear/select/segment_at; M4/M5 adds relabel/boundary/confirm/merge/save/discard; StateEvent.kind pre-declares all future kinds, only "loaded"/"selection" emitted so far), state/state_bridge.py (EditorStateBridge translates StateEvent → Qt signals), views/waveform_view.py (pyqtgraph envelope downsample 3000 cols, playhead, click-to-seek), views/segment_overlay.py (LinearRegionItem tone bands, non-draggable; M4 adds dragging), models/qt_adapters.py (SegmentTableModel), main_window.py (QMainWindow, File→Open, single _pos_timer 33ms; _viz/_dispatch deferred), app.py (build QApplication + Application + MainWindow), run_ui.py (entrypoint: `python -m guitar_helper.run_ui --mock`).
+- **Click handler unified:** waveform click → both controller.seek() AND editor_state.select(segment_at(ms)) in ONE path (simpler than per-band handlers).
+- **Tests:** test_editor_state.py (11 tests: load/select/segment_at/defensive-copy), +4 to test_repository.py (list_tracks), test_ui_smoke.py (4 pytest-qt headless: window builds, library populates, row selection syncs, timer starts/stops). Total 152 passing, ruff clean.
+- **Manual verification:** live on library.db (9 tracks, 129 segments) — launched `python -m guitar_helper.run_ui --mock`, confirmed library shows correct correction-progress (e.g., carry_on_my_wayward_son [16/16]), double-clicking a track renders envelope + 16 tone bands + segment table, click-in-waveform seeks + highlights band + syncs table row. Closed cleanly (exit 0, no stderr).
+- **Milestones:** M1-M3 done. **M4 next:** relabel/boundary/confirm/exclude ops (CLI parity). **M5 next:** merge op + segments_calibration table (schema v7). M6/M7 (preset panel+dispatch log, spectrum+lyrics) deferred.
+
+## ISSUE-004 (OPEN) — Nolly receives PC but does not switch preset
+- Break is INSIDE the plugin, not our code. PCs confirmed at Cantabile + Nolly MIDI In monitors (Channel 1, PC 0-4). See `docs/debug/ISSUE-004-nolly-program-change-no-preset-switch.md`.
+- Host: Cantabile Lite (Ableton Intro abandoned — filters PC to plugins). loopMIDI required on Windows.
+- **Nolly MIDI Mappings dialog vs flyout mismatch:** table shows 2 rows (cleeeen=PC0, edge of break up=PC1) but flyout shows only the cleeeen mapping live → `edge` row likely NOT committed/saved → uncommitted mappings do not fire.
+- **PC numbers in plugin DON'T match app scheme:** plugin has edge=PC1; app sends edge=PC3. Only PC0 (clean) currently aligns. Must remap all 5 to clean=0/crunch=1/metal=2/edge=3/overdrive=4, ideally via MIDI Learn exact-capture, then disarm learn + save the Cantabile song.
+- Top suspects: (A) VST3 ignores raw MIDI PC unless plugin's internal MIDI-PC handling is enabled, (B) MIDI Learn left armed, (C) mappings typed not learned, (D) uncommitted/wrong-PC rows.
 
 ## MIDI preset mapping (presets table = source of truth; never hardcode)
 - clean=PC0, crunch=PC1, metal=PC2, edge=PC3, overdrive=PC4, other=-1 (no dispatch).
@@ -66,5 +68,5 @@ Status: **Phase 1 + 2 DONE. Phase 3 readiness DONE. Phase 3 (Playback + MIDI) DO
 - Batch analysis skips already-analyzed songs by hash; `--reanalyze` to force (now blocked on corrected tracks without `--discard-corrections`).
 
 ## Pending phases
-- **Phase 4:** PySide6 UI (MainWindow, transport, waveform, spectrum, lyrics, segment overlay), preset panel, embedded segment editor. Consume VisualizationBridge queue (already produced by PlaybackEngine).
+- **Phase 4 M4/M5:** Relabel/boundary/confirm/exclude ops (CLI parity). Merge op + segments_calibration table (schema v7). **M6/M7 deferred:** preset panel+dispatch log (ISSUE-004 fix), spectrum+lyrics.
 - **Phase 5:** PyInstaller `.exe`, bundled ffmpeg, setup guide.

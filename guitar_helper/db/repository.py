@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .interfaces import ISegmentStore, Preset, Segment
+from .interfaces import ISegmentStore, Preset, Segment, Track
 from .schema import utcnow
 
 
@@ -150,6 +150,34 @@ class SQLiteSegmentStore(ISegmentStore):
             (file_hash,),
         ).fetchone()
         return bool(row[0]) if row else False
+
+    def list_tracks(self) -> list[Track]:
+        rows = self._conn.execute(
+            """
+            SELECT t.file_hash, t.filename, t.title, t.artist, t.duration_ms,
+                   t.source_path, t.calibration_excluded,
+                   COALESCE(SUM(s.manually_corrected), 0) AS corrected,
+                   COUNT(s.id) AS total
+            FROM tracks t
+            LEFT JOIN segments s ON s.file_hash = t.file_hash
+            GROUP BY t.file_hash
+            ORDER BY t.artist, t.title, t.filename
+            """
+        ).fetchall()
+        return [
+            Track(
+                file_hash=r[0],
+                filename=r[1],
+                title=r[2],
+                artist=r[3],
+                duration_ms=r[4],
+                source_path=r[5],
+                calibration_excluded=bool(r[6]),
+                corrected_count=r[7],
+                total_count=r[8],
+            )
+            for r in rows
+        ]
 
 
 # ------------------------------------------------------------------

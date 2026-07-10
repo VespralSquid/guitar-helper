@@ -22,6 +22,19 @@ class Preset:
     pc_number: int  # -1 means no MIDI dispatch (used for 'other')
 
 
+@dataclass
+class Track:
+    file_hash: str
+    filename: str
+    title: str | None
+    artist: str | None
+    duration_ms: int
+    source_path: str | None
+    calibration_excluded: bool
+    corrected_count: int   # manually_corrected=1 segments
+    total_count: int       # all segments; needs-labeling = corrected_count < total_count
+
+
 class ISegmentStore(ABC):
 
     @abstractmethod
@@ -67,3 +80,7 @@ class ISegmentStore(ABC):
     @abstractmethod
     def get_calibration_excluded(self, file_hash: str) -> bool:
         """Return True if the track is excluded from calibration."""
+
+    @abstractmethod
+    def list_tracks(self) -> list[Track]:
+        """Return every analysed track with correction-progress counts."""

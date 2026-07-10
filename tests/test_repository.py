@@ -264,3 +264,50 @@ def test_save_track_upsert_preserves_calibration_excluded(store, db):
 def test_save_track_source_path_defaults_null(store, db):
     store.save_track("h1", "song.wav", None, None, 60000)
     assert _track_row(db, "h1")[4] is None
+
+
+# =========================================================================
+# list_tracks
+# =========================================================================
+
+# Test 31 — zero-segment track still appears (LEFT JOIN), with zero counts
+def test_list_tracks_includes_zero_segment_track(store):
+    store.save_track("h1", "song.wav", "Song", "Artist", 60000, source_path="/a.wav")
+    tracks = store.list_tracks()
+    assert len(tracks) == 1
+    t = tracks[0]
+    assert t.file_hash == "h1"
+    assert t.corrected_count == 0
+    assert t.total_count == 0
+    assert t.calibration_excluded is False
+    assert t.source_path == "/a.wav"
+
+
+# Test 32 — corrected/total counts aggregate manually_corrected segments
+def test_list_tracks_aggregates_correction_counts(store):
+    store.save_track("h1", "song.wav", "Song", "Artist", 60000)
+    store.save_segments(
+        "h1",
+        [
+            make_segment("h1", 0, 1000, manually_corrected=True),
+            make_segment("h1", 1000, 2000, manually_corrected=False),
+            make_segment("h1", 2000, 3000, manually_corrected=True),
+        ],
+    )
+    tracks = store.list_tracks()
+    assert len(tracks) == 1
+    assert tracks[0].corrected_count == 2
+    assert tracks[0].total_count == 3
+
+
+# Test 33 — ordered by artist, title, filename
+def test_list_tracks_ordered_by_artist_title_filename(store):
+    store.save_track("h2", "b.wav", "Song B", "Zed", 60000)
+    store.save_track("h1", "a.wav", "Song A", "Abe", 60000)
+    tracks = store.list_tracks()
+    assert [t.file_hash for t in tracks] == ["h1", "h2"]
+
+
+# Test 34 — no tracks in an empty DB
+def test_list_tracks_empty(store):
+    assert store.list_tracks() == []

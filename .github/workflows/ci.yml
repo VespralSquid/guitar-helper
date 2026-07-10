@@ -23,11 +23,12 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install dev tools
-        run: pip install ruff pytest
+        run: pip install ruff pytest pytest-qt
 
       - name: Lint (ruff)
         run: ruff check guitar_helper/
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
-        # No-op until tests/ is populated; pytest exits 0 on empty suite
+        env:
+          QT_QPA_PLATFORM: offscreen
