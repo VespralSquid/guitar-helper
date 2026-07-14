@@ -39,7 +39,7 @@ def test_dispatch_only_on_tone_change(store, track_hash):
     tick_at(2500)   # still metal (adjacent segment, same tone)
     tick_at(3000)   # crunch
 
-    assert port.sent == [(0, 0), (0, 2), (0, 1)]  # clean, metal, crunch
+    assert port.sent == [(0, 0), (0, 4), (0, 3)]  # clean, metal, crunch
 
 
 def test_other_holds_preset_no_dispatch_and_logs(store, track_hash, caplog):
@@ -67,7 +67,7 @@ def test_boundary_lookahead_fires_early(store, track_hash):
     tick_at(924)    # effective 999 -> still clean
     assert port.sent == [(0, 0)]
     tick_at(925)    # effective 1000 -> metal, fires 75ms early
-    assert port.sent == [(0, 0), (0, 2)]
+    assert port.sent == [(0, 0), (0, 4)]
 
 
 def test_pc_sourced_from_presets_table(store, track_hash):
@@ -102,4 +102,4 @@ def test_dispatch_loop_runs_on_its_own_thread(store, track_hash):
     dispatcher.start()
     time.sleep(0.1)
     dispatcher.stop()
-    assert (0, 2) in port.sent
+    assert (0, 4) in port.sent

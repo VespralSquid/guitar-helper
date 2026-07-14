@@ -217,6 +217,27 @@ def test_v6_adds_overdrive_preset():
         os.unlink(path)
 
 
+def test_fresh_db_has_calibration_and_playlist_tables(db):
+    tables = _table_names(db)
+    assert {"segments_calibration", "playlists", "playlist_tracks"}.issubset(tables)
+
+
+def test_migration_creates_calibration_and_playlist_tables():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    conn = None
+    try:
+        _make_v3_db(path)
+        conn = init_db(path)
+        tables = _table_names(conn)
+        assert {"segments_calibration", "playlists", "playlist_tracks"}.issubset(tables)
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == _CURRENT_VERSION
+    finally:
+        if conn is not None:
+            conn.close()
+        os.unlink(path)
+
+
 @pytest.mark.parametrize("start_version", [1, 2])
 def test_migration_upgrades_to_current(start_version):
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:

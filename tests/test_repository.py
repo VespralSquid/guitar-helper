@@ -18,10 +18,10 @@ def test_get_presets_returns_all_defaults(store):
     assert "ambient" not in labels
     by_label = {p.tone_label: p for p in presets}
     assert by_label["clean"].pc_number == 0
-    assert by_label["crunch"].pc_number == 1
-    assert by_label["metal"].pc_number == 2
-    assert by_label["edge"].pc_number == 3
-    assert by_label["overdrive"].pc_number == 4
+    assert by_label["edge"].pc_number == 1
+    assert by_label["overdrive"].pc_number == 2
+    assert by_label["crunch"].pc_number == 3
+    assert by_label["metal"].pc_number == 4
     assert by_label["other"].pc_number == -1
 
 
@@ -311,3 +311,53 @@ def test_list_tracks_ordered_by_artist_title_filename(store):
 # Test 34 — no tracks in an empty DB
 def test_list_tracks_empty(store):
     assert store.list_tracks() == []
+
+
+# ------------------------------------------------------------------
+# Playlists (O2)
+# ------------------------------------------------------------------
+
+def test_playlist_crud_roundtrip(store, track_hash):
+    playlist_id = store.create_playlist("Practice")
+    playlists = store.list_playlists()
+    assert [p.name for p in playlists] == ["Practice"]
+    assert playlists[0].track_count == 0
+
+    store.add_to_playlist(playlist_id, track_hash)
+    store.add_to_playlist(playlist_id, track_hash)  # duplicate is a no-op
+    assert store.list_playlists()[0].track_count == 1
+    assert [t.file_hash for t in store.get_playlist_tracks(playlist_id)] == [track_hash]
+
+    store.remove_from_playlist(playlist_id, track_hash)
+    assert store.get_playlist_tracks(playlist_id) == []
+
+    store.delete_playlist(playlist_id)
+    assert store.list_playlists() == []
+
+
+def test_playlist_tracks_keep_insertion_order(store):
+    for h, name in (("hc", "c.wav"), ("ha", "a.wav"), ("hb", "b.wav")):
+        store.save_track(h, name, None, None, 1000)
+    playlist_id = store.create_playlist("Ordered")
+    for h in ("hc", "ha", "hb"):
+        store.add_to_playlist(playlist_id, h)
+    assert [t.file_hash for t in store.get_playlist_tracks(playlist_id)] == ["hc", "ha", "hb"]
+
+
+def test_delete_playlist_cascades_membership(store, db, track_hash):
+    playlist_id = store.create_playlist("Doomed")
+    store.add_to_playlist(playlist_id, track_hash)
+    store.delete_playlist(playlist_id)
+    rows = db.execute("SELECT COUNT(*) FROM playlist_tracks").fetchone()[0]
+    assert rows == 0
+
+
+def test_duplicate_playlist_name_raises(store):
+    store.create_playlist("Same")
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_playlist("Same")
+
+
+def test_list_tracks_includes_analysed_at(store, track_hash):
+    track = store.list_tracks()[0]
+    assert track.analysed_at.startswith("2026-01-01")

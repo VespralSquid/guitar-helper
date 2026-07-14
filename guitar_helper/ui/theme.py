@@ -19,30 +19,26 @@ TONE_COLORS: dict[str, str] = {
 FONT_FAMILY = "Segoe UI"
 ICON_DIR = Path(__file__).parent / "assets" / "icons"
 
-WAVEFORM_COLUMNS = 3000
-BAND_ALPHA = 70
-BAND_ALPHA_SELECTED = 160
+SIDEBAR_WIDTH = 140
+QUEUE_SIDEBAR_WIDTH = 260
 PLAYHEAD_WIDTH = 2
 PLAYHEAD_COLOR = "#e5e7eb"
-WAVEFORM_COLOR = "#93c5fd"
+
+TIMELINE_HEIGHT = 48
+TIMELINE_BG = "#26262f"
+TIMELINE_ALPHA = 150
+TIMELINE_ALPHA_SELECTED = 235
+TIMELINE_SELECTED_BORDER = "#e5e7eb"
 
 
 def tone_color(label: str) -> str:
     return TONE_COLORS.get(label, TONE_COLORS["other"])
 
 
-def tone_brush(label: str, *, selected: bool = False):
-    from pyqtgraph import mkBrush
-
+def tone_qcolor(label: str, *, selected: bool = False) -> QColor:
     color = QColor(tone_color(label))
-    color.setAlpha(BAND_ALPHA_SELECTED if selected else BAND_ALPHA)
-    return mkBrush(color)
-
-
-def tone_pen(label: str):
-    from pyqtgraph import mkPen
-
-    return mkPen(QColor(tone_color(label)), width=1)
+    color.setAlpha(TIMELINE_ALPHA_SELECTED if selected else TIMELINE_ALPHA)
+    return color
 
 
 def icon(name: str) -> QIcon | None:
@@ -97,5 +93,16 @@ QMenuBar, QMenu {
 }
 QMenu::item:selected {
     background-color: #3d3d48;
+}
+QListWidget#modeSidebar {
+    border: none;
+    background-color: #1a1a20;
+}
+QListWidget#modeSidebar::item {
+    padding: 10px 12px;
+}
+QListWidget#modeSidebar::item:selected {
+    background-color: #3d3d48;
+    border-left: 3px solid #93c5fd;
 }
 """

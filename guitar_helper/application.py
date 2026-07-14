@@ -56,30 +56,54 @@ class Application:
         self.lookup: SegmentLookup | None = None
         self.dispatcher: MidiDispatcher | None = None
 
-    def load(self, path: str | Path) -> str:
+    def decode(self, path: str | Path) -> tuple[str, AudioBuffer]:
+        """Hash and fully decode a file. Touches no DB, Qt, or playback state,
+        so it is safe to run on a worker thread while the main thread keeps
+        the sole SQLite connection and the live runtime graph."""
         file_hash = self._loader.hash_file(path)
+        buffer = AudioBuffer.from_file(path, self._loader)
+        return file_hash, buffer
+
+    def attach(self, file_hash: str, buffer: AudioBuffer, name: str = "") -> None:
+        """Main thread only: validate, tear down the previous runtime graph,
+        wire the new one. Validation comes first so a failed load leaves the
+        current track playing untouched."""
         if not self.store.get_segments(file_hash):
+            label = name or "track"
             raise NoSegmentsError(
-                f"No analysed segments for {Path(path).name!r} (hash {file_hash[:12]}…). "
+                f"No analysed segments for {label!r} (hash {file_hash[:12]}…). "
                 f"Run run_analysis first."
             )
-        self.buffer = AudioBuffer.from_file(path, self._loader)
-        self.tracker = PositionTracker(self.buffer.sr)
-        self.engine = PlaybackEngine(self.buffer, self.tracker, self.viz.queue)
+        self.stop()
+        self.buffer = buffer
+        self.tracker = PositionTracker(buffer.sr)
+        # viz_queue=None until a spectrum view consumes it (plan: O4/deferred) —
+        # with no consumer the bounded queue fills and every audio callback
+        # pays a queue.Full raise for nothing (ISSUE-005 hygiene).
+        self.engine = PlaybackEngine(buffer, self.tracker, None)
         self.lookup = SegmentLookup(self.store, file_hash)
         self.dispatcher = MidiDispatcher(
             self.store, self.lookup, self.tracker, self.port, channel=self.channel
         )
+
+    def load(self, path: str | Path) -> str:
+        file_hash, buffer = self.decode(path)
+        self.attach(file_hash, buffer, name=Path(path).name)
         return file_hash
 
     def play(self) -> None:
+        if self.engine is None or self.dispatcher is None:
+            return
         self.dispatcher.start()
         self.engine.play()
 
     def pause(self) -> None:
-        self.engine.pause()
+        if self.engine is not None:
+            self.engine.pause()
 
     def seek(self, position_ms: int) -> None:
+        if self.engine is None or self.dispatcher is None:
+            return
         self.engine.seek(position_ms)
         self.dispatcher.reset()
 

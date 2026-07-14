@@ -54,7 +54,53 @@ def test_wired_dispatch_uses_injected_port(app):
     application.tracker.set_cursor(int(1.5 * application.buffer.sr))
     application.dispatcher.tick()
 
-    assert application.port.sent == [(0, 0), (0, 2)]
+    assert application.port.sent == [(0, 0), (0, 4)]
+
+
+def test_decode_returns_hash_and_buffer(app):
+    application, wav, file_hash = app
+    decoded_hash, buffer = application.decode(wav)
+    assert decoded_hash == file_hash
+    assert abs(buffer.duration_ms - 2000) <= 5
+    assert application.engine is None  # decode alone must not touch runtime state
+
+
+def test_reload_stops_previous_engine_and_dispatcher(app, monkeypatch):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "clean")])
+    application.load(wav)
+
+    old_engine, old_dispatcher = application.engine, application.dispatcher
+    stopped = []
+    monkeypatch.setattr(old_engine, "stop", lambda: stopped.append("engine"))
+    monkeypatch.setattr(old_dispatcher, "stop", lambda: stopped.append("dispatcher"))
+
+    application.load(wav)
+
+    assert "engine" in stopped and "dispatcher" in stopped
+    assert application.engine is not old_engine
+    assert application.dispatcher is not old_dispatcher
+
+
+def test_attach_unknown_hash_raises_and_preserves_runtime(app):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "clean")])
+    application.load(wav)
+    engine = application.engine
+
+    _, buffer = application.decode(wav)
+    with pytest.raises(NoSegmentsError):
+        application.attach("deadbeef" * 8, buffer)
+
+    assert application.engine is engine  # failed load leaves the current track intact
+
+
+def test_play_pause_seek_are_noops_before_load(app):
+    application, _, _ = app
+    application.play()
+    application.pause()
+    application.seek(500)
+    assert application.engine is None
 
 
 def test_shutdown_closes_port(app):

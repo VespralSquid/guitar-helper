@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import sqlite3
 
-from .interfaces import ISegmentStore, Preset, Segment, Track
+from .interfaces import IPlaylistStore, ISegmentStore, Playlist, Preset, Segment, Track
 from .schema import utcnow
 
+_TRACK_SELECT = """
+    SELECT t.file_hash, t.filename, t.title, t.artist, t.duration_ms,
+           t.source_path, t.calibration_excluded, t.analysed_at,
+           COALESCE(SUM(s.manually_corrected), 0) AS corrected,
+           COUNT(s.id) AS total
+    FROM tracks t
+    LEFT JOIN segments s ON s.file_hash = t.file_hash
+"""
 
-class SQLiteSegmentStore(ISegmentStore):
+
+class SQLiteSegmentStore(ISegmentStore, IPlaylistStore):
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -153,36 +162,90 @@ class SQLiteSegmentStore(ISegmentStore):
 
     def list_tracks(self) -> list[Track]:
         rows = self._conn.execute(
-            """
-            SELECT t.file_hash, t.filename, t.title, t.artist, t.duration_ms,
-                   t.source_path, t.calibration_excluded,
-                   COALESCE(SUM(s.manually_corrected), 0) AS corrected,
-                   COUNT(s.id) AS total
-            FROM tracks t
-            LEFT JOIN segments s ON s.file_hash = t.file_hash
+            _TRACK_SELECT + """
             GROUP BY t.file_hash
             ORDER BY t.artist, t.title, t.filename
             """
         ).fetchall()
-        return [
-            Track(
-                file_hash=r[0],
-                filename=r[1],
-                title=r[2],
-                artist=r[3],
-                duration_ms=r[4],
-                source_path=r[5],
-                calibration_excluded=bool(r[6]),
-                corrected_count=r[7],
-                total_count=r[8],
-            )
-            for r in rows
-        ]
+        return [_row_to_track(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Playlists
+    # ------------------------------------------------------------------
+
+    def create_playlist(self, name: str) -> int:
+        cursor = self._conn.execute(
+            "INSERT INTO playlists(name, created_at) VALUES (?, ?)",
+            (name, utcnow()),
+        )
+        self._conn.commit()
+        return cursor.lastrowid
+
+    def delete_playlist(self, playlist_id: int) -> None:
+        self._conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        self._conn.commit()
+
+    def list_playlists(self) -> list[Playlist]:
+        rows = self._conn.execute(
+            """
+            SELECT p.id, p.name, p.created_at, COUNT(pt.file_hash)
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+            GROUP BY p.id
+            ORDER BY p.name
+            """
+        ).fetchall()
+        return [Playlist(id=r[0], name=r[1], created_at=r[2], track_count=r[3]) for r in rows]
+
+    def add_to_playlist(self, playlist_id: int, file_hash: str) -> None:
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO playlist_tracks(playlist_id, file_hash, position)
+            SELECT ?, ?, COALESCE(MAX(position), -1) + 1
+            FROM playlist_tracks WHERE playlist_id = ?
+            """,
+            (playlist_id, file_hash, playlist_id),
+        )
+        self._conn.commit()
+
+    def remove_from_playlist(self, playlist_id: int, file_hash: str) -> None:
+        self._conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ? AND file_hash = ?",
+            (playlist_id, file_hash),
+        )
+        self._conn.commit()
+
+    def get_playlist_tracks(self, playlist_id: int) -> list[Track]:
+        rows = self._conn.execute(
+            _TRACK_SELECT + """
+            JOIN playlist_tracks pt ON pt.file_hash = t.file_hash
+            WHERE pt.playlist_id = ?
+            GROUP BY t.file_hash
+            ORDER BY pt.position
+            """,
+            (playlist_id,),
+        ).fetchall()
+        return [_row_to_track(r) for r in rows]
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _row_to_track(r: tuple) -> Track:
+    return Track(
+        file_hash=r[0],
+        filename=r[1],
+        title=r[2],
+        artist=r[3],
+        duration_ms=r[4],
+        source_path=r[5],
+        calibration_excluded=bool(r[6]),
+        analysed_at=r[7],
+        corrected_count=r[8],
+        total_count=r[9],
+    )
+
 
 def _row_to_segment(row: tuple) -> Segment:
     return Segment(

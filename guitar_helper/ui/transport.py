@@ -13,6 +13,8 @@ class TransportControls(QWidget):
     playClicked = Signal()
     pauseClicked = Signal()
     stopClicked = Signal()
+    nextClicked = Signal()
+    previousClicked = Signal()
     seekRequested = Signal(int)
     loopToggled = Signal(bool)
 
@@ -21,18 +23,22 @@ class TransportControls(QWidget):
         self._duration_ms = 0
         self._slider_pressed = False
 
+        self.previous_button = QPushButton("Prev")
         self.play_button = QPushButton("Play")
         self.pause_button = QPushButton("Pause")
         self.stop_button = QPushButton("Stop")
+        self.next_button = QPushButton("Next")
         self.loop_checkbox = QCheckBox("Loop segment")
         self.position_label = QLabel("00:00 / 00:00")
         self.seek_slider = QSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 0)
 
         layout = QHBoxLayout(self)
+        layout.addWidget(self.previous_button)
         layout.addWidget(self.play_button)
         layout.addWidget(self.pause_button)
         layout.addWidget(self.stop_button)
+        layout.addWidget(self.next_button)
         layout.addWidget(self.loop_checkbox)
         layout.addWidget(self.seek_slider, stretch=1)
         layout.addWidget(self.position_label)
@@ -40,6 +46,8 @@ class TransportControls(QWidget):
         self.play_button.clicked.connect(self.playClicked)
         self.pause_button.clicked.connect(self.pauseClicked)
         self.stop_button.clicked.connect(self.stopClicked)
+        self.next_button.clicked.connect(self.nextClicked)
+        self.previous_button.clicked.connect(self.previousClicked)
         self.loop_checkbox.toggled.connect(self.loopToggled)
         self.seek_slider.sliderPressed.connect(self._on_slider_pressed)
         self.seek_slider.sliderReleased.connect(self._on_slider_released)
@@ -47,7 +55,15 @@ class TransportControls(QWidget):
         self.set_enabled_playback(False)
 
     def set_enabled_playback(self, enabled: bool) -> None:
-        for widget in (self.play_button, self.pause_button, self.stop_button, self.seek_slider):
+        widgets = (
+            self.previous_button,
+            self.play_button,
+            self.pause_button,
+            self.stop_button,
+            self.next_button,
+            self.seek_slider,
+        )
+        for widget in widgets:
             widget.setEnabled(enabled)
 
     def set_duration_ms(self, duration_ms: int) -> None:

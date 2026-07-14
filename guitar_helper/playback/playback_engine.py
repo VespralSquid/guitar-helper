@@ -23,7 +23,7 @@ class PlaybackEngine:
         buffer: AudioBuffer,
         tracker: PositionTracker,
         viz_queue: queue.Queue | None = None,
-        blocksize: int = 1024,
+        blocksize: int = 2048,
     ) -> None:
         self._buffer = buffer
         self._tracker = tracker
@@ -43,6 +43,7 @@ class PlaybackEngine:
                 samplerate=self._buffer.sr,
                 channels=self._buffer.n_channels,
                 blocksize=self._blocksize,
+                latency="high",
                 callback=self._callback,
             )
         if not self._stream.active:

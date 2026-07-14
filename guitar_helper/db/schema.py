@@ -36,20 +36,50 @@ CREATE TABLE IF NOT EXISTS segments (
 
 CREATE INDEX IF NOT EXISTS idx_seg_lookup
     ON segments(file_hash, start_ms, end_ms);
+
+CREATE TABLE IF NOT EXISTS segments_calibration (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_hash          TEXT NOT NULL REFERENCES tracks(file_hash),
+    start_ms           INTEGER NOT NULL,
+    end_ms             INTEGER NOT NULL,
+    tone_label         TEXT NOT NULL,
+    confidence         REAL NOT NULL,
+    manually_corrected INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_segcal_hash
+    ON segments_calibration(file_hash);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    file_hash   TEXT NOT NULL REFERENCES tracks(file_hash),
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, file_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pt_order
+    ON playlist_tracks(playlist_id, position);
 """
 
-_CURRENT_VERSION = 6
+_CURRENT_VERSION = 8
 
 _DEFAULT_PRESETS = [
     ("clean",     "Clean",            0),
-    ("crunch",    "Crunch",           1),
-    ("metal",     "Metal",            2),
-    ("edge",      "Edge of Breakup",  3),
-    ("overdrive", "Overdrive",        4),
+    ("edge",      "Edge of Breakup",  1),
+    ("overdrive", "Overdrive",        2),
+    ("crunch",    "Crunch",           3),
+    ("metal",     "Metal",            4),
     ("other",     "Other",           -1),  # -1 = no MIDI dispatch
 ]
-# 'ambient' (was PC3) deferred — no calibration data. Re-add a seed row + a re-seed
-# migration to restore it (pick a free PC; 0-3 are now clean/crunch/metal/edge).
+# PC order is a deliberate clean->metal gain progression: clean, edge,
+# overdrive, crunch, metal. 'ambient' deferred — no calibration data. Re-add a
+# seed row + a re-seed migration to restore it on a free PC.
 
 
 def init_db(path: str) -> sqlite3.Connection:
@@ -124,12 +154,55 @@ def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v6_to_v7(conn: sqlite3.Connection) -> None:
+    # Calibration snapshot table (Phase 4 O3): lazy pre-edit copy of segments.
+    # executescript on _DDL is idempotent, so re-running the CREATEs is safe.
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS segments_calibration (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_hash          TEXT NOT NULL REFERENCES tracks(file_hash),
+            start_ms           INTEGER NOT NULL,
+            end_ms             INTEGER NOT NULL,
+            tone_label         TEXT NOT NULL,
+            confidence         REAL NOT NULL,
+            manually_corrected INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_segcal_hash
+            ON segments_calibration(file_hash);
+        """
+    )
+
+
+def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
+    # Playlists (Phase 4 O2).
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS playlists (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+            playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+            file_hash   TEXT NOT NULL REFERENCES tracks(file_hash),
+            position    INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, file_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pt_order
+            ON playlist_tracks(playlist_id, position);
+        """
+    )
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
     4: _migrate_v3_to_v4,
     5: _migrate_v4_to_v5,
     6: _migrate_v5_to_v6,
+    7: _migrate_v6_to_v7,
+    8: _migrate_v7_to_v8,
 }
 
 
