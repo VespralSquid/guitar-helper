@@ -1,5 +1,9 @@
 # Phase 4 Implementation Plan — PySide6 Prototype Correction/Calibration UI
 
+> **Superseded (2026-07-13):** M1-M3 shipped as designed here. The remaining roadmap
+> (M4-M7) is re-homed in `phase4-overhaul-plan.md` (M4/M5 → O3, M6 → O4, M7 deferred).
+> This document remains the design record for M1-M3 and for the O3 editor internals (§§2-4).
+
 _Status: APPROVED (planning). No code written yet. Schema v7 approved as planned._
 
 ## 0. Framing

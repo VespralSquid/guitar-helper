@@ -1,0 +1,9 @@
+# Error 1: slow loadtimes
+    - loading a song can often be slow when pulling it up to edit and correct, taking multiple seconds 
+
+# Error 2: Audio choppiness
+    - Audio is often really choppy during playback
+    - noticed the choppiness tends to go away after clicking and loading up a different song
+
+# Error 3: Audio Persistence
+    - The previously played song continues playback when switching between songs, which is fine, but going back too the initial song does not allow controling the playback anymore, rather it seems to start a different instance of the playback, resulting in the same audio playback being overlayed rather than pausing or stopping the previous playback(let me know if my description here is not clear) 
