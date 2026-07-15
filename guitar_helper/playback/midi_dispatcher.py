@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from guitar_helper.db.interfaces import ISegmentStore
+from guitar_helper.db.interfaces import IPresetStore
 from guitar_helper.midi.interfaces import IMidiPort
 from guitar_helper.playback.position_tracker import PositionTracker
 from guitar_helper.playback.segment_lookup import SegmentLookup
@@ -25,7 +25,7 @@ class MidiDispatcher:
 
     def __init__(
         self,
-        store: ISegmentStore,
+        store: IPresetStore,
         lookup: SegmentLookup,
         tracker: PositionTracker,
         port: IMidiPort,

@@ -20,10 +20,12 @@ from tests.conftest import make_segment  # noqa: E402
 @pytest.fixture
 def window(qtbot, db, store, make_wav, tmp_path, monkeypatch):
     hashes = []
+    wav_paths = []
     loader = AudioLoader()
     # Different durations -> different file content -> distinct hashes.
     for filename, duration_s in (("test.wav", 2.0), ("test2.wav", 1.5)):
         wav = make_wav(filename, duration_s=duration_s, sr=22050)
+        wav_paths.append(wav)
         file_hash = loader.hash_file(wav)
         hashes.append(file_hash)
         duration_ms = int(duration_s * 1000)
@@ -48,6 +50,7 @@ def window(qtbot, db, store, make_wav, tmp_path, monkeypatch):
 
     win = MainWindow(application)
     win.play_calls = play_calls
+    win.wav_paths = wav_paths
     qtbot.addWidget(win)
     yield win, hashes
     win.close()
@@ -120,6 +123,252 @@ def test_analysis_populates_after_load(window, qtbot):
 
     assert win._stack.currentWidget() is win.analysis
     assert win.analysis.segment_model.rowCount() == 2
+
+
+def test_relabel_save_round_trips_through_wiring_to_store(window, qtbot):
+    """Drives the real signal chain: AnalysisMode -> MainWindow -> EditorState
+    -> store, proving the step 7 wiring is actually connected end to end."""
+    win, hashes = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+
+    win.analysis.segment_table.selectRow(0)
+    assert win._state.selection_index == 0
+
+    win.analysis.relabel_combo.textActivated.emit("edge")
+
+    assert win._state.dirty is True
+    assert win.analysis.segment_model.segment_at_row(0).tone_label == "edge"
+    assert win.analysis.save_button.isEnabled()
+
+    win.analysis.save_button.click()
+
+    assert win._state.dirty is False
+    assert win._app.store.get_segments(hashes[0])[0].tone_label == "edge"
+
+
+def test_merge_moves_selection_and_shrinks_table(window, qtbot):
+    win, hashes = window
+    win._app.store.save_segments(
+        hashes[0],
+        [
+            make_segment(hashes[0], 0, 1000, "metal"),
+            make_segment(hashes[0], 1000, 2000, "metal"),
+        ],
+    )
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.merge_button.click()
+
+    assert win.analysis.segment_model.rowCount() == 1
+    assert win._state.selection_index == 0
+    assert win._state.dirty is True
+
+    win.analysis.save_button.click()
+    live = win._app.store.get_segments(hashes[0])
+    original = win._app.store.get_calibration_segments(hashes[0])
+    assert len(live) == 1
+    assert len(original) == 2  # pre-merge snapshot preserved
+
+
+def _analyze_row(win, qtbot, row: int = 0) -> None:
+    win.home.song_table.selectRow(row)
+    with qtbot.waitSignal(win.loadFinished, timeout=5000):
+        win.home.analyze_button.click()
+
+
+def test_analyze_button_enters_analysis_with_header_and_autoplay(window, qtbot):
+    win, hashes = window
+    _analyze_row(win, qtbot, 0)
+
+    assert win._stack.currentWidget() is win.analysis
+    assert win.play_calls  # autoplay, same pipeline as double-click
+    assert "Library" in win.analysis.header_label.text()
+    assert "1 of 2" in win.analysis.header_label.text()
+    assert not win.analysis.prev_song_button.isEnabled()  # first song
+    assert win.analysis.next_song_button.isEnabled()
+
+
+def test_analysis_next_song_advances_and_updates_header(window, qtbot):
+    win, hashes = window
+    _analyze_row(win, qtbot, 0)
+
+    with qtbot.waitSignal(win.loadFinished, timeout=5000):
+        win.analysis.next_song_button.click()
+
+    assert win._state.file_hash == hashes[1]
+    assert "2 of 2" in win.analysis.header_label.text()
+    assert win.analysis.prev_song_button.isEnabled()
+    assert not win.analysis.next_song_button.isEnabled()  # last song
+
+
+def test_non_playlist_load_clears_playlist_header(window, qtbot):
+    win, hashes = window
+    _analyze_row(win, qtbot, 0)
+    assert win.analysis.header_label.text() != ""
+
+    _play_row(win, qtbot, 1)  # ordinary Home double-click, not Analyze
+
+    assert win.analysis.header_label.text() == ""
+    assert not win.analysis.prev_song_button.isEnabled()
+    assert not win.analysis.next_song_button.isEnabled()
+
+
+def test_analysis_next_prompts_discard_when_dirty(window, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    win, hashes = window
+    _analyze_row(win, qtbot, 0)
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.relabel_combo.textActivated.emit("edge")
+    assert win._state.dirty is True
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel
+    )
+    win.analysis.next_song_button.click()
+
+    assert win._state.file_hash == hashes[0]  # navigation was cancelled
+    assert win._state.dirty is True  # edit preserved, not silently discarded
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Discard
+    )
+    with qtbot.waitSignal(win.loadFinished, timeout=5000):
+        win.analysis.next_song_button.click()
+
+    assert win._state.file_hash == hashes[1]  # navigation proceeded after confirming
+
+
+def test_boundary_drag_round_trips_to_store(window, qtbot):
+    win, hashes = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+
+    original = win._app.store.get_segments(hashes[0])
+    left_id, right_id = original[0].id, original[1].id
+    boundary_ms = original[0].end_ms
+
+    win.analysis.timeline.boundaryEditRequested.emit(0, boundary_ms - 100)
+    assert win._state.dirty is True
+    win.analysis.save_button.click()
+
+    updated = {s.id: s for s in win._app.store.get_segments(hashes[0])}
+    assert updated[left_id].end_ms == boundary_ms - 100
+    assert updated[right_id].start_ms == boundary_ms - 100
+
+
+def test_exclude_checkbox_round_trips_to_store(window, qtbot):
+    win, hashes = window
+    _play_row(win, qtbot, 0)
+    assert win._app.store.get_calibration_excluded(hashes[0]) is False
+
+    win.analysis.exclude_checkbox.click()
+
+    assert win._app.store.get_calibration_excluded(hashes[0]) is True  # eager, no save needed
+
+
+def test_confirm_all_round_trips_to_store(window, qtbot):
+    win, hashes = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+
+    win.analysis.confirm_all_button.click()
+    win.analysis.save_button.click()
+
+    segments = win._app.store.get_segments(hashes[0])
+    assert all(s.manually_corrected for s in segments)
+    assert all(s.confidence == 1.0 for s in segments)
+
+
+def test_discard_reverts_working_list_and_never_writes_store(window, qtbot):
+    win, hashes = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+    original_label = win._app.store.get_segments(hashes[0])[0].tone_label
+
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.relabel_combo.textActivated.emit("edge")
+    assert win._state.dirty is True
+
+    win.analysis.discard_button.click()
+
+    assert win._state.dirty is False
+    assert win.analysis.segment_model.segment_at_row(0).tone_label == original_label
+    assert win._app.store.get_segments(hashes[0])[0].tone_label == original_label
+
+
+def test_edit_session_composes_relabel_boundary_confirm_and_merge(window, qtbot):
+    """Chains four edit ops on one track before a single save, proving they
+    compose correctly (indices/ids stay valid across the chain) and that the
+    calibration snapshot still reflects the track's pristine pre-session state."""
+    win, hashes = window
+    win._app.store.save_segments(
+        hashes[0],
+        [
+            make_segment(hashes[0], 0, 1000, "clean"),
+            make_segment(hashes[0], 1000, 2000, "metal"),
+        ],
+    )
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.relabel_combo.textActivated.emit("metal")  # now matches segment 1
+
+    win.analysis.timeline.boundaryEditRequested.emit(0, 800)
+
+    win.analysis.segment_table.selectRow(1)
+    win.analysis.confirm_button.click()
+
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.merge_button.click()
+
+    assert win.analysis.segment_model.rowCount() == 1
+    assert win._state.dirty is True
+
+    win.analysis.save_button.click()
+
+    live = win._app.store.get_segments(hashes[0])
+    assert len(live) == 1
+    assert live[0].tone_label == "metal"
+    assert live[0].start_ms == 0
+    assert live[0].end_ms == 2000
+
+    original = win._app.store.get_calibration_segments(hashes[0])
+    assert len(original) == 2
+    assert [s.tone_label for s in original] == ["clean", "metal"]
+
+
+def test_reanalysis_guard_fires_after_gui_edit_and_save(window, qtbot):
+    """Closes the O3 acceptance loop: apply_* stamps manually_corrected=True,
+    so a track that starts with NO corrections should become re-analysis
+    -protected purely by being edited and saved through the GUI."""
+    from guitar_helper.analysis.pipeline import AnalysisPipeline, ManualCorrectionsExistError
+
+    win, hashes = window
+    win._app.store.save_segments(
+        hashes[0],
+        [
+            make_segment(hashes[0], 0, 1000, "clean", manually_corrected=False),
+            make_segment(hashes[0], 1000, 2000, "metal", manually_corrected=False),
+        ],
+    )
+    assert not any(s.manually_corrected for s in win._app.store.get_segments(hashes[0]))
+
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_ANALYSIS)
+    win.analysis.segment_table.selectRow(0)
+    win.analysis.relabel_combo.textActivated.emit("edge")
+    win.analysis.save_button.click()
+
+    assert any(s.manually_corrected for s in win._app.store.get_segments(hashes[0]))
+
+    pipeline = AnalysisPipeline(win._app.store)
+    with pytest.raises(ManualCorrectionsExistError):
+        pipeline.run(win.wav_paths[0])
 
 
 def test_mode_switching_keeps_transport_and_timer_alive(window, qtbot):

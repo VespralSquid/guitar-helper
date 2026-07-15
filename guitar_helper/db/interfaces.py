@@ -44,31 +44,8 @@ class Playlist:
     track_count: int
 
 
-class ISegmentStore(ABC):
-
-    @abstractmethod
-    def get_segment(self, file_hash: str, position_ms: int) -> Segment | None:
-        """Return the segment active at position_ms, or None."""
-
-    @abstractmethod
-    def save_segments(self, file_hash: str, segments: list[Segment]) -> None:
-        """Persist (or replace) all segments for a track."""
-
-    @abstractmethod
-    def update_segment(self, segment: Segment) -> None:
-        """Write corrected fields back for a single segment row."""
-
-    @abstractmethod
-    def get_segments(self, file_hash: str) -> list[Segment]:
-        """Return all segments for a track, ordered by start_ms."""
-
-    @abstractmethod
-    def get_presets(self) -> list[Preset]:
-        """Return all tone presets."""
-
-    @abstractmethod
-    def save_preset(self, preset: Preset) -> None:
-        """Insert or replace a preset row."""
+class ITrackCatalog(ABC):
+    """Track metadata: library listing + calibration-exclusion flag."""
 
     @abstractmethod
     def save_track(
@@ -93,6 +70,56 @@ class ISegmentStore(ABC):
     @abstractmethod
     def list_tracks(self) -> list[Track]:
         """Return every analysed track with correction-progress counts."""
+
+
+class ISegmentReader(ABC):
+    """Read-only segment access — playback and lookup paths only need this."""
+
+    @abstractmethod
+    def get_segment(self, file_hash: str, position_ms: int) -> Segment | None:
+        """Return the segment active at position_ms, or None."""
+
+    @abstractmethod
+    def get_segments(self, file_hash: str) -> list[Segment]:
+        """Return all segments for a track, ordered by start_ms."""
+
+
+class ISegmentEditor(ABC):
+    """Segment writes: bulk replace (analysis) and single-row correction."""
+
+    @abstractmethod
+    def save_segments(self, file_hash: str, segments: list[Segment]) -> None:
+        """Persist (or replace) all segments for a track."""
+
+    @abstractmethod
+    def update_segment(self, segment: Segment) -> None:
+        """Write corrected fields back for a single segment row."""
+
+    @abstractmethod
+    def delete_segment(self, segment_id: int) -> None:
+        """Delete a single segment row (used by merge to remove absorbed segments)."""
+
+    @abstractmethod
+    def ensure_calibration_copy(self, file_hash: str) -> None:
+        """Snapshot this track's current segments into segments_calibration,
+        but only if no snapshot exists yet — idempotent, never overwrites."""
+
+    @abstractmethod
+    def get_calibration_segments(self, file_hash: str) -> list[Segment]:
+        """Return the pre-edit calibration snapshot for a track, or [] if
+        ensure_calibration_copy has never been called for it."""
+
+
+class IPresetStore(ABC):
+    """Tone-to-PC preset mapping — the MIDI dispatcher's only dependency."""
+
+    @abstractmethod
+    def get_presets(self) -> list[Preset]:
+        """Return all tone presets."""
+
+    @abstractmethod
+    def save_preset(self, preset: Preset) -> None:
+        """Insert or replace a preset row."""
 
 
 class IPlaylistStore(ABC):
@@ -122,3 +149,9 @@ class IPlaylistStore(ABC):
     @abstractmethod
     def get_playlist_tracks(self, playlist_id: int) -> list[Track]:
         """Return the playlist's tracks in position order."""
+
+
+class ISegmentStore(ITrackCatalog, ISegmentReader, ISegmentEditor, IPresetStore):
+    """Deprecated combined alias, kept for consumers that genuinely span
+    multiple roles (composition root, analysis pipeline, correction CLI).
+    New code should type-hint the specific role ABC it needs instead."""

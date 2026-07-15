@@ -1,14 +1,12 @@
 # Save State — Guitar Helper
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-14_
 
-Status: **Phase 1+2 DONE. Phase 3 DONE. Phase 4: M0 + O1 + O2 DONE. ISSUE-005 RESOLVED** (user ear-confirmed; waveform→SegmentTimeline). Branch `phase3-readiness`, NOT pushed, all Phase-4 work uncommitted. Next: commit, then O3 (Analysis rework). "Play next" clarity polish deferred to fancy-UI pass.
+Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (all 9 steps, uncommitted).** Branch `phase4-o3-analysis`, 291 tests passing, ruff clean. Next: user decides commit/push or proceed to O4.
 
 ---
 
 ## Phase 1 + 2 (DONE)
-- Tiers: Analysis (offline) → Playback+MIDI → UI. Fully offline, Python + SQLite.
-- DB, AudioLoader, FeatureExtractor (24-feat), Segmenter (cosine auto-k), ThresholdClassifier, AnalysisPipeline, stem separation, correction CLI, 4 run_* CLIs — all built + tested.
-- **Stem pipeline:** extract features from guitar STEM (not full mix) for segmentation + classification. ISSUE-001/002/003 RESOLVED. `overdrive` tone added (edge/crunch confusion → 0).
+- Tiers: Analysis (offline) → Playback+MIDI → UI. DB, AudioLoader, FeatureExtractor (24-feat), Segmenter (cosine auto-k), ThresholdClassifier, AnalysisPipeline, stem separation, correction CLI. ISSUE-001/002/003 resolved via stem pipeline + overdrive tone.
 
 
 ## CRITICAL incident — calibration labels lost & protected
@@ -31,24 +29,23 @@ Status: **Phase 1+2 DONE. Phase 3 DONE. Phase 4: M0 + O1 + O2 DONE. ISSUE-005 RE
 - Tests: 133 passing, ruff clean. MidoPort test skipped in CI (`importorskip("rtmidi")`).
 
 ## Phase 4 UI M1-M3 (DONE)
-- **DB layer extended:** Track dataclass + list_tracks() (LEFT JOIN segments for correction-progress, zero-segment tracks included). Schema still v6.
-- **UI package built:** `guitar_helper/ui/` — theme.py (colors/QSS/sizes, zero assets, icon() → None, callers fallback to text), controllers.py (PlaybackController wraps Application, owns loop-current-segment logic), transport.py (TransportControls widget), panels/library_panel.py (track list via list_tracks), state/editor_state.py (Qt-free EditorState: load_track/clear/select/segment_at; M4/M5 adds relabel/boundary/confirm/merge/save/discard; StateEvent.kind pre-declares all future kinds, only "loaded"/"selection" emitted so far), state/state_bridge.py (EditorStateBridge translates StateEvent → Qt signals), views/waveform_view.py (pyqtgraph envelope downsample 3000 cols, playhead, click-to-seek), views/segment_overlay.py (LinearRegionItem tone bands, non-draggable; M4 adds dragging), models/qt_adapters.py (SegmentTableModel), main_window.py (QMainWindow, File→Open, single _pos_timer 50ms; _viz/_dispatch deferred), app.py (build QApplication + Application + MainWindow), run_ui.py (entrypoint: `python -m guitar_helper.run_ui --mock`).
-- **Click handler unified:** waveform click → both controller.seek() AND editor_state.select(segment_at(ms)) in ONE path (simpler than per-band handlers).
-- **Tests:** test_editor_state.py (11 tests: load/select/segment_at/defensive-copy), +4 to test_repository.py (list_tracks), test_ui_smoke.py (4 pytest-qt headless: window builds, library populates, row selection syncs, timer starts/stops). Total 152 passing, ruff clean.
-- **Manual verification:** live on library.db (9 tracks, 129 segments) — launched `python -m guitar_helper.run_ui --mock`, confirmed library shows correct correction-progress (e.g., carry_on_my_wayward_son [16/16]), double-clicking a track renders envelope + 16 tone bands + segment table, click-in-waveform seeks + highlights band + syncs table row. Closed cleanly (exit 0, no stderr).
-## Phase 4 overhaul — M0 + O1 + O2 (DONE 2026-07-13)
-- New plan: docs/plans/phase4-overhaul-plan.md SUPERSEDES phase4-ui-plan.md roadmap. §6 = user acceptance criteria AC1-8 + dispositions. Old doc = design record for O3 editor internals.
-- User decisions: double-click plays (single selects); now-playing TEXT-only (cover art deferred — read embedded iTunes/Bandcamp tags via mutagen later); recalibrate-in-UI DROPPED (stays CLI, design parked in plan's Deferred); Media mode ABSORBED (3 modes: Home/Analysis/Output); playlists persist (schema v8), queue in-memory; after O2 RE-ASSESS with user before O3.
-- M0: Application.load split → decode() (hash+decode, thread-safe, no DB) + attach() (main thread: validate THEN stop() old engine/dispatcher THEN wire new). play/pause/seek None-guarded. ui/load_worker.py LoadWorker(QThread) runs decode; MainWindow attaches on decoded signal, disables library + "Loading…" while in flight, loadFinished signal for tests. USER VERIFIED: Errors 1/2/3 in docs/debug/"List of known errors" all fixed (no freeze, no orphaned/overlaid playback).
-- O1: MainWindow now shell — sidebar (QListWidget#modeSidebar) + QStackedWidget with 4 modes (Home/Media/Analysis/Output, constants MODE_*) + persistent transport strip. ui/modes/: home.py (HomeMode: stats label + LibraryPanel, trackChosen), analysis.py (AnalysisMode: waveform+overlay+segment table in splitter; signals seekRequested/rowSelected; methods load_buffer/set_segments/set_selected/set_playhead_ms), placeholders.py (MediaMode/OutputMode stubs for O2/O4). Load auto-switches to Analysis mode. Playhead repaint skipped when Analysis not visible; _last_pos_ms reset on switch-to-Analysis.
-- SRP rule: shell only connects mode signals to controller/state; each mode owns its widgets.
-- Tests 159 passing (was 152; +4 app lifecycle, +3 net smoke), ruff clean, smoke launch OK.
-- O2 (playlist-first Home + queue sidebar): schema v7 (segments_calibration table only, store methods deferred to O3) + v8 (playlists, playlist_tracks; UNIQUE name; PK(playlist_id,file_hash) blocks dupes; ON DELETE CASCADE). IPlaylistStore ABC (create/delete/list/add/remove/get_playlist_tracks) on SQLiteSegmentStore. Track gains analysed_at ("Date added", col existed).
-- Home = playlist-first: virtual "Library (all songs)" pseudo-playlist (NOT a DB row) + real playlists; song table (TrackTableModel: Title/Artist/Date added/Progress); New-playlist button; context menus (add-to-playlist, remove-from-playlist, delete playlist). LibraryPanel DELETED. Double-click song → async load + AUTOPLAY + queue seeded from shown playlist; STAYS in Home (auto-switch to Analysis removed).
-- QueueState (ui/state/queue_state.py, Qt-free, injectable rng): advance(manual) honors repeat-one only on auto; shuffle keeps current first, stable un-shuffle respects removals; move/remove/play_next/play_at. QueueStateBridge in state_bridge.py.
-- QueueSidebar (ui/panels/queue_sidebar.py): shell-level right sidebar all modes — now-playing text, queue list (bold ▶ current), Up/Down/Play-next/Remove/Clear, Shuffle toggle + Repeat cycle. Pure queue ops go straight to QueueState; playAtRequested → shell load pipeline.
-- Shell wiring: _pending_queue applied only after successful attach; File→Open falls back to single-track queue; same-hash replay = stop()+play() (avoids CallbackStop restart subtlety); track-finished detection in _on_pos_tick (_was_playing flag + position ≥ duration−50ms) → advance(manual=False). Transport gains Prev/Next.
-- Verified: 187 tests passing (was 159; +18 queue_state, +5 repository, +2 schema, +3 net smoke; smoke fixture monkeypatches Application.play — autoplay must not open a real stream), ruff clean, smoke launch OK. Now 194 tests (+7 segment_timeline) after waveform→timeline swap. LIVE library.db migrated v6→v8 on first launch: 9 tracks/129 segments/129 corrections intact.
+- Track dataclass + list_tracks() (LEFT JOIN segments for correction-progress). UI package built: theme/controllers/transport/panels/state/models/main_window/app/run_ui. EditorState (Qt-free) owns load/select/segment_at; Qt-bridge via EditorStateBridge + StateEvent. Tests 152 passing, live verification OK.
+## Phase 4 M0 + O1 + O2 (DONE 2026-07-13)
+- M0: Application.load split → decode() + attach() (main thread, validate/stop-old/wire-new). LoadWorker(QThread); user errors 1-3 fixed (no freeze/orphans).
+- O1: MainWindow shell (sidebar QListWidget + QStackedWidget: Home/Analysis/Media/Output modes) + persistent transport. Analysis mode auto-selected on load; playhead repaint skipped when hidden. QueueState (Qt-free, injectable rng); QueueSidebar (now-playing text, queue list, Shuffle/Repeat/Up/Down/Play-next/Clear). ISSUE-005 FIX: SegmentTimeline replaces pyqtgraph waveform (playhead repaints only per pixel-column, not 20Hz). 
+- O2: schema v7→v8 (playlists, playlist_tracks, ON DELETE CASCADE). Home = playlist-first: virtual "Library" + real playlists; double-click song → load+autoplay, queue seeded from shown playlist, STAYS in Home. Shell wiring: _pending_queue after attach; File→Open single-track fallback; track-finished via _on_pos_tick (_was_playing flag + position ≥ duration−50ms). Verified 194 tests, LIVE db migrated v6→v8 OK (9 tracks/129 segments/corrections intact).
+
+## Phase 4 O3 (Analysis) — steps 1-9/9 DONE (uncommitted)
+- **Step 1: ISP interface split** — `ISegmentStore` (11 methods) → 4 role interfaces: `ITrackCatalog`, `ISegmentReader`, `ISegmentEditor`, `IPresetStore`. Kept deprecated `ISegmentStore` alias for backward-compat.
+- **Step 2: calibration-copy store methods** — `delete_segment`, `ensure_calibration_copy` (idempotent snapshot), `get_calibration_segments` on `ISegmentEditor`.
+- **Step 3: `ui/editor/validation.py`** — Qt-free EditResult, validate/apply ops (relabel/boundary/confirm). GUI relabeling = dropdown from TONE_LABELS.
+- **Step 4: `ui/editor/merge.py`** — Qt-free MergePlan, find_same_tone_run, merge_run. Kept physical merge (virtual already at dispatch time).
+- **Step 5: EditorState edit ops** — relabel/edit_boundary/confirm/confirm_all/merge_run/set_excluded/save/discard; dirty/excluded properties. Pattern: validate → mutate → queue pending/deleted → emit StateEvent.
+- **Step 6: SegmentTimeline boundary dragging** — Added `validate_boundary_move`/`apply_boundary_move` to validation.py, `EditorState.move_boundary()`. SegmentTimeline: `boundary_at_x` hit-tester (Qt-free, unit-testable), drag state machine with live preview, cursor swap to SizeHorCursor. REGRESSION CAUGHT: existing test clicked exact pixel that became boundary hit-zone → fixed by moving test click position.
+- **Step 7: AnalysisMode UI wiring** — relabel QComboBox (dropdown-only, uses textActivated to avoid feedback loop), Confirm/Confirm-All/Merge buttons, Exclude checkbox, dirty label, Save/Discard buttons. Wired through new signals to main_window.py; validation rejections surface via 4-second status-bar message. REGRESSION CAUGHT: `set_playhead_ms` accidentally dropped during rewrite, restored by fixing smoke-test AttributeError.
+- **Step 8: playlist-scoped Analysis (AC7)** — Home "Analyze" button acts on selected playlist; AnalysisMode got header bar + Prev/Next for playlist paging (separate from Transport's queue Prev/Next). main_window.py gained `_enter_playlist_analysis()` + `_confirm_discard_if_dirty()` guard. SCOPING DECISION (user confirmed): dirty-guard only on new playlist Analyze/Prev/Next, NOT retrofitted onto existing O2 queue Prev/Next or Home double-click (known gap, accepted).
+- **Step 9: test-gap closure + acceptance** — E2E integration tests: boundary-drag-to-store, exclude-toggle-to-store, confirm-all-to-store, discard. "Kitchen sink" test: relabel→boundary→confirm→merge→save chain. Test proving re-analysis guard causally honors corrections after GUI edit. USER verified live app: no bugs/errors (after venv activation fix).
+- **O3 architecture:** ISP split decomposed ISegmentStore into 4 role interfaces; O3 store methods on ISegmentEditor. Qt-free core (validation.py, merge.py, editor_state.py) fully unit-tested; Qt layer tested via pytest-qt (isolated widgets + full E2E).
 
 ## ISSUE-004 (OPEN) — Nolly receives PC but does not switch preset
 - Break is INSIDE the plugin, not our code. PCs confirmed at Cantabile + Nolly MIDI In monitors (Channel 1, PC 0-4). See `docs/debug/ISSUE-004-nolly-program-change-no-preset-switch.md`.
@@ -63,6 +60,7 @@ Status: **Phase 1+2 DONE. Phase 3 DONE. Phase 4: M0 + O1 + O2 DONE. ISSUE-005 RE
 - Also: engine viz_queue=None in Application.attach (no consumer until spectrum; was raising queue.Full every callback).
 - O3 boundary dragging will land on SegmentTimeline (drag band edges), superseding old M4 InfiniteLine design (noted in phase4-overhaul-plan.md O3).
 - Audible confirmation in Analysis mode PENDING user re-test. Restore point: git tag `pre-issue-005-fix` (commit 1330f25).
+- Post-O2 user feedback: "Play next" sidebar button works (reorder-after-current, Spotify semantics) but unclear + selection doesn't follow moved item — KEEP, clarity polish deferred to fancy-UI pass.
 
 ## MIDI preset mapping (presets table = source of truth; never hardcode)
 - clean=PC0, crunch=PC1, metal=PC2, edge=PC3, overdrive=PC4, other=-1 (no dispatch).
@@ -87,5 +85,6 @@ Status: **Phase 1+2 DONE. Phase 3 DONE. Phase 4: M0 + O1 + O2 DONE. ISSUE-005 RE
 - Batch analysis skips already-analyzed songs by hash; `--reanalyze` to force (now blocked on corrected tracks without `--discard-corrections`).
 
 ## Pending phases
-- **Phase 4 overhaul:** RE-ASSESS with user (O2 shipped) → O3 Analysis (playlist-scoped entry + header + prev/next traversal, edit ops =old M4/M5, segments_calibration store methods, waveform demoted to compact strip) → O4 Output (preset panel PC-only + dispatch log). See docs/plans/phase4-overhaul-plan.md §6.
-- **Phase 5:** PyInstaller `.exe`, bundled ffmpeg, setup guide.
+- **O4 Output:** preset panel (PC-only) + DispatchLogBuffer/log_sink + dispatch log panel → diagnostic for ISSUE-004.
+- **ISSUE-004 manual (user):** remap Nolly PCs to clean=0/crunch=1/metal=2/edge=3/overdrive=4 via MIDI Learn, commit mappings, save Cantabile song.
+- **Later pool:** fancy-UI pass (incl. Play-next affordance), cover art/metadata via mutagen (iTunes/Bandcamp tags), lyrics+spectrum (spectrum re-adds pyqtgraph + re-enable viz_queue), queue persistence, more overdrive labels + recalibrate, Phase 5 PyInstaller.

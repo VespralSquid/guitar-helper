@@ -27,8 +27,22 @@ def x_to_ms(x: float, duration_ms: int, width: int) -> int:
     return int(max(0.0, min(x, width)) / width * duration_ms)
 
 
+def boundary_at_x(
+    x: float, segments: list[Segment], duration_ms: int, width: int, hit_px: int
+) -> int | None:
+    """Index of the interior boundary (between segments[i] and segments[i+1])
+    within hit_px of x, or None. Track start/end are never boundaries here —
+    there's no segment on the other side to move with them."""
+    for i in range(len(segments) - 1):
+        bx = ms_to_x(segments[i].end_ms, duration_ms, width)
+        if abs(x - bx) <= hit_px:
+            return i
+    return None
+
+
 class SegmentTimeline(QWidget):
     seekRequested = Signal(int)  # position_ms
+    boundaryEditRequested = Signal(int, int)  # left_index, new_ms
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -40,6 +54,8 @@ class SegmentTimeline(QWidget):
         self._selected: int | None = None
         self._playhead_ms = 0
         self._last_playhead_x = -1
+        self._dragging_boundary: int | None = None
+        self._drag_preview_ms: int | None = None
 
     # ------------------------------------------------------------------
     # state
@@ -82,8 +98,15 @@ class SegmentTimeline(QWidget):
         width = self.width()
         selected_rect = None
         for i, segment in enumerate(self._segments):
-            x0 = ms_to_x(segment.start_ms, self._duration_ms, width)
-            x1 = ms_to_x(segment.end_ms, self._duration_ms, width)
+            start_ms = segment.start_ms
+            end_ms = segment.end_ms
+            if self._dragging_boundary is not None:
+                if i == self._dragging_boundary:
+                    end_ms = self._drag_preview_ms
+                elif i == self._dragging_boundary + 1:
+                    start_ms = self._drag_preview_ms
+            x0 = ms_to_x(start_ms, self._duration_ms, width)
+            x1 = ms_to_x(end_ms, self._duration_ms, width)
             selected = i == self._selected
             painter.fillRect(
                 x0, 0, max(1, x1 - x0), height,
@@ -106,16 +129,49 @@ class SegmentTimeline(QWidget):
         painter.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        if self._duration_ms > 0 and event.button() == Qt.MouseButton.LeftButton:
-            self.seekRequested.emit(
-                x_to_ms(event.position().x(), self._duration_ms, self.width())
-            )
+        if self._duration_ms <= 0 or event.button() != Qt.MouseButton.LeftButton:
+            return
+        x = event.position().x()
+        boundary = boundary_at_x(
+            x, self._segments, self._duration_ms, self.width(), theme.BOUNDARY_HIT_PX
+        )
+        if boundary is not None:
+            self._dragging_boundary = boundary
+            self._drag_preview_ms = self._segments[boundary].end_ms
+            return
+        self.seekRequested.emit(x_to_ms(x, self._duration_ms, self.width()))
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if self._duration_ms <= 0:
             return
-        ms = x_to_ms(event.position().x(), self._duration_ms, self.width())
+        x = event.position().x()
+        if self._dragging_boundary is not None:
+            left = self._segments[self._dragging_boundary]
+            right = self._segments[self._dragging_boundary + 1]
+            candidate = x_to_ms(x, self._duration_ms, self.width())
+            self._drag_preview_ms = max(left.start_ms + 1, min(candidate, right.end_ms - 1))
+            self.update()
+            return
+        boundary = boundary_at_x(
+            x, self._segments, self._duration_ms, self.width(), theme.BOUNDARY_HIT_PX
+        )
+        self.setCursor(
+            Qt.CursorShape.SizeHorCursor if boundary is not None
+            else Qt.CursorShape.PointingHandCursor
+        )
+        ms = x_to_ms(x, self._duration_ms, self.width())
         tone = next(
             (s.tone_label for s in self._segments if s.start_ms <= ms < s.end_ms), None
         )
         self.setToolTip(tone or "")
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if self._dragging_boundary is None:
+            return
+        left_index = self._dragging_boundary
+        new_ms = self._drag_preview_ms
+        self._dragging_boundary = None
+        self._drag_preview_ms = None
+        if new_ms is not None:
+            self.boundaryEditRequested.emit(left_index, new_ms)
+        self.update()

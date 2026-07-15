@@ -34,6 +34,15 @@ class MockStore(ISegmentStore):
     def update_segment(self, segment) -> None:
         self._segments = [segment if s.id == segment.id else s for s in self._segments]
 
+    def delete_segment(self, segment_id) -> None:
+        self._segments = [s for s in self._segments if s.id != segment_id]
+
+    def ensure_calibration_copy(self, file_hash) -> None:
+        pass
+
+    def get_calibration_segments(self, file_hash):
+        return []
+
     def get_presets(self) -> list[Preset]:
         return []
 

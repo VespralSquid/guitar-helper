@@ -27,11 +27,14 @@ from guitar_helper.db.interfaces import Track
 from guitar_helper.ui.models.qt_adapters import TrackTableModel
 
 _PLAYLIST_ID_ROLE = Qt.ItemDataRole.UserRole  # int | None (None = virtual Library)
+_PLAYLIST_NAME_ROLE = Qt.ItemDataRole.UserRole + 1  # clean name, no " (count)" suffix
 _NEW_PLAYLIST = "New playlist"
+_LIBRARY_NAME = "Library"
 
 
 class HomeMode(QWidget):
     playRequested = Signal(object, int)  # (list[Track] queue, start index)
+    analyzeRequested = Signal(str, object, int)  # playlist_name, list[Track], start_index
 
     def __init__(self, store, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -46,6 +49,7 @@ class HomeMode(QWidget):
         self.playlist_list = QListWidget()
         self.playlist_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.new_playlist_button = QPushButton(_NEW_PLAYLIST)
+        self.analyze_button = QPushButton("Analyze")
 
         self.track_model = TrackTableModel()
         self.song_table = QTableView()
@@ -61,6 +65,7 @@ class HomeMode(QWidget):
         left_layout.addWidget(QLabel("Playlists"))
         left_layout.addWidget(self.playlist_list, stretch=1)
         left_layout.addWidget(self.new_playlist_button)
+        left_layout.addWidget(self.analyze_button)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -82,6 +87,7 @@ class HomeMode(QWidget):
         self.new_playlist_button.clicked.connect(self._on_new_playlist)
         self.song_table.doubleClicked.connect(self._on_song_double_clicked)
         self.song_table.customContextMenuRequested.connect(self._on_song_menu)
+        self.analyze_button.clicked.connect(self._on_analyze_clicked)
 
         self.refresh()
 
@@ -96,6 +102,7 @@ class HomeMode(QWidget):
 
         library_item = QListWidgetItem("Library (all songs)")
         library_item.setData(_PLAYLIST_ID_ROLE, None)
+        library_item.setData(_PLAYLIST_NAME_ROLE, _LIBRARY_NAME)
         self.playlist_list.addItem(library_item)
 
         playlists = self._store.list_playlists()
@@ -103,6 +110,7 @@ class HomeMode(QWidget):
         for playlist in playlists:
             item = QListWidgetItem(f"{playlist.name} ({playlist.track_count})")
             item.setData(_PLAYLIST_ID_ROLE, playlist.id)
+            item.setData(_PLAYLIST_NAME_ROLE, playlist.name)
             self.playlist_list.addItem(item)
             if playlist.id == selected_id:
                 restore_row = self.playlist_list.count() - 1
@@ -117,6 +125,10 @@ class HomeMode(QWidget):
         item = self.playlist_list.currentItem()
         return item.data(_PLAYLIST_ID_ROLE) if item else None
 
+    def current_playlist_name(self) -> str:
+        item = self.playlist_list.currentItem()
+        return item.data(_PLAYLIST_NAME_ROLE) if item else _LIBRARY_NAME
+
     def _reload_songs(self) -> None:
         playlist_id = self.current_playlist_id()
         if playlist_id is None:
@@ -124,6 +136,7 @@ class HomeMode(QWidget):
         else:
             tracks = self._store.get_playlist_tracks(playlist_id)
         self.track_model.set_tracks(tracks)
+        self.analyze_button.setEnabled(bool(tracks))
 
     def _refresh_stats(self) -> None:
         tracks = self._store.list_tracks()
@@ -145,6 +158,14 @@ class HomeMode(QWidget):
         track = tracks[index.row()]
         if track.source_path:
             self.playRequested.emit(tracks, index.row())
+
+    def _on_analyze_clicked(self) -> None:
+        tracks = self.track_model.tracks
+        if not tracks:
+            return
+        rows = self.song_table.selectionModel().selectedRows()
+        start_index = rows[0].row() if rows else 0
+        self.analyzeRequested.emit(self.current_playlist_name(), tracks, start_index)
 
     def _on_new_playlist(self) -> None:
         name, ok = QInputDialog.getText(self, _NEW_PLAYLIST, "Playlist name:")

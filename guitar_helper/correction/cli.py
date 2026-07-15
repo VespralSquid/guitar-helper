@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from guitar_helper.analysis.tone_classifier import TONE_LABELS
 from guitar_helper.db.interfaces import ISegmentStore, Segment
+from guitar_helper.ui.editor.validation import (
+    apply_boundary,
+    apply_confirm,
+    apply_relabel,
+    validate_boundary,
+    validate_relabel,
+)
 
 
 def _format_ms(ms: int) -> str:
@@ -20,21 +27,12 @@ def _format_segment(idx: int, seg: Segment) -> str:
     )
 
 
-def _confirm(seg: Segment) -> Segment:
-    """Affirm a segment's existing label as user-verified ground truth."""
-    return Segment(
-        id=seg.id, file_hash=seg.file_hash,
-        start_ms=seg.start_ms, end_ms=seg.end_ms,
-        tone_label=seg.tone_label, confidence=1.0, manually_corrected=True,
-    )
-
-
 def _parse_confirm(tokens: list[str], segments: list[Segment]) -> tuple[Segment, ...] | None:
     """Parse a `confirm <idx>` or `confirm all` command."""
     if len(tokens) != 2:
         return None
     if tokens[1] == "all":
-        return tuple(_confirm(s) for s in segments)
+        return tuple(apply_confirm(s) for s in segments)
     try:
         idx = int(tokens[1])
     except ValueError:
@@ -42,7 +40,36 @@ def _parse_confirm(tokens: list[str], segments: list[Segment]) -> tuple[Segment,
     if idx < 0 or idx >= len(segments):
         print(f"  Index {idx} out of range (0–{len(segments) - 1}).")
         return None
-    return (_confirm(segments[idx]),)
+    return (apply_confirm(segments[idx]),)
+
+
+def _parse_relabel(tokens: list[str], seg: Segment) -> tuple[Segment, ...] | None:
+    """Parse `<idx> <label>` (idx already resolved to seg)."""
+    label = tokens[1]
+    result = validate_relabel(label, TONE_LABELS)
+    if not result.ok:
+        print(f"  {result.error}")
+        return None
+    return (apply_relabel(seg, label),)
+
+
+def _parse_boundary(tokens: list[str], segments: list[Segment], idx: int) -> tuple[Segment, ...] | None:
+    """Parse `<idx> <start_ms> <end_ms> <label>` (idx already resolved)."""
+    try:
+        start_ms, end_ms = int(tokens[1]), int(tokens[2])
+    except ValueError:
+        print("  start_ms and end_ms must be integers.")
+        return None
+    label = tokens[3]
+    relabel_result = validate_relabel(label, TONE_LABELS)
+    if not relabel_result.ok:
+        print(f"  {relabel_result.error}")
+        return None
+    boundary_result = validate_boundary(segments, idx, start_ms, end_ms)
+    if not boundary_result.ok:
+        print(f"  {boundary_result.error}")
+        return None
+    return (apply_boundary(segments[idx], start_ms, end_ms, label),)
 
 
 def _parse_command(tokens: list[str], segments: list[Segment]) -> tuple[Segment, ...] | None:
@@ -59,43 +86,11 @@ def _parse_command(tokens: list[str], segments: list[Segment]) -> tuple[Segment,
         print(f"  Index {idx} out of range (0–{len(segments) - 1}).")
         return None
 
-    seg = segments[idx]
-
     if len(tokens) == 2:
-        label = tokens[1]
-        if label not in TONE_LABELS:
-            print(f"  Unknown label {label!r}. Valid: {', '.join(TONE_LABELS)}")
-            return None
-        return (Segment(
-            id=seg.id, file_hash=seg.file_hash,
-            start_ms=seg.start_ms, end_ms=seg.end_ms,
-            tone_label=label, confidence=1.0, manually_corrected=True,
-        ),)
+        return _parse_relabel(tokens, segments[idx])
 
     if len(tokens) == 4:
-        try:
-            start_ms, end_ms = int(tokens[1]), int(tokens[2])
-        except ValueError:
-            print("  start_ms and end_ms must be integers.")
-            return None
-        label = tokens[3]
-        if label not in TONE_LABELS:
-            print(f"  Unknown label {label!r}. Valid: {', '.join(TONE_LABELS)}")
-            return None
-        if start_ms >= end_ms:
-            print("  start_ms must be less than end_ms.")
-            return None
-        if idx > 0 and start_ms < segments[idx - 1].end_ms:
-            print(f"  start_ms {start_ms} overlaps segment {idx - 1} (ends at {segments[idx - 1].end_ms}).")
-            return None
-        if idx < len(segments) - 1 and end_ms > segments[idx + 1].start_ms:
-            print(f"  end_ms {end_ms} overlaps segment {idx + 1} (starts at {segments[idx + 1].start_ms}).")
-            return None
-        return (Segment(
-            id=seg.id, file_hash=seg.file_hash,
-            start_ms=start_ms, end_ms=end_ms,
-            tone_label=label, confidence=1.0, manually_corrected=True,
-        ),)
+        return _parse_boundary(tokens, segments, idx)
 
     return None
 

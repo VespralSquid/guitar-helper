@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bisect
 
-from guitar_helper.db.interfaces import ISegmentStore, Segment
+from guitar_helper.db.interfaces import ISegmentReader, Segment
 
 
 class SegmentLookup:
@@ -14,7 +14,7 @@ class SegmentLookup:
     has no place in the dispatch loop.
     """
 
-    def __init__(self, store: ISegmentStore, file_hash: str) -> None:
+    def __init__(self, store: ISegmentReader, file_hash: str) -> None:
         self._segments = store.get_segments(file_hash)  # ordered by start_ms
         self._starts = [s.start_ms for s in self._segments]
 

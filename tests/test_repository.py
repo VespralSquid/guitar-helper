@@ -213,6 +213,65 @@ def test_update_segment_bad_id_no_exception(store, track_hash):
 
 
 # =========================================================================
+# delete_segment
+# =========================================================================
+
+def test_delete_segment_removes_row(store, track_hash):
+    store.save_segments(track_hash, [
+        make_segment(track_hash, 0, 1000),
+        make_segment(track_hash, 1000, 2000),
+    ])
+    victim, survivor = store.get_segments(track_hash)
+    store.delete_segment(victim.id)
+    remaining = store.get_segments(track_hash)
+    assert len(remaining) == 1
+    assert remaining[0].id == survivor.id
+
+
+def test_delete_segment_bad_id_no_exception(store):
+    store.delete_segment(999999)  # must not raise
+
+
+# =========================================================================
+# ensure_calibration_copy / get_calibration_segments
+# =========================================================================
+
+def test_get_calibration_segments_empty_when_never_copied(store, track_hash):
+    store.save_segments(track_hash, [make_segment(track_hash, 0, 1000)])
+    assert store.get_calibration_segments(track_hash) == []
+
+
+def test_ensure_calibration_copy_snapshots_current_segments(store, track_hash):
+    store.save_segments(track_hash, [
+        make_segment(track_hash, 0, 1000, tone_label="clean"),
+        make_segment(track_hash, 1000, 2000, tone_label="metal"),
+    ])
+    store.ensure_calibration_copy(track_hash)
+    snapshot = store.get_calibration_segments(track_hash)
+    assert [s.tone_label for s in snapshot] == ["clean", "metal"]
+
+
+def test_ensure_calibration_copy_idempotent_preserves_first_snapshot(store, track_hash):
+    store.save_segments(track_hash, [make_segment(track_hash, 0, 1000, tone_label="clean")])
+    store.ensure_calibration_copy(track_hash)
+
+    seg = store.get_segments(track_hash)[0]
+    seg.tone_label = "metal"
+    store.update_segment(seg)
+    store.ensure_calibration_copy(track_hash)  # second call: must be a no-op
+
+    snapshot = store.get_calibration_segments(track_hash)
+    assert len(snapshot) == 1
+    assert snapshot[0].tone_label == "clean"  # unaffected by the later edit
+    assert store.get_segments(track_hash)[0].tone_label == "metal"  # edit still applied
+
+
+def test_ensure_calibration_copy_no_segments_is_noop(store, track_hash):
+    store.ensure_calibration_copy(track_hash)
+    assert store.get_calibration_segments(track_hash) == []
+
+
+# =========================================================================
 # FK constraints
 # =========================================================================
 

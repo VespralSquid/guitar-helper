@@ -15,6 +15,7 @@ class EditorStateBridge(QObject):
     segmentsChanged = Signal()
     dirtyChanged = Signal(bool)
     savedChanged = Signal()
+    excludedChanged = Signal(bool)
 
     def __init__(self, state: EditorState) -> None:
         super().__init__()
@@ -32,6 +33,8 @@ class EditorStateBridge(QObject):
             self.dirtyChanged.emit(self._state.dirty)
         elif event.kind == "saved":
             self.savedChanged.emit()
+        elif event.kind == "excluded":
+            self.excludedChanged.emit(self._state.excluded)
 
 
 class QueueStateBridge(QObject):

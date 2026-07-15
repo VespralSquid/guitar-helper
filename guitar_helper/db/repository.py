@@ -97,6 +97,41 @@ class SQLiteSegmentStore(ISegmentStore, IPlaylistStore):
         ).fetchall()
         return [_row_to_segment(r) for r in rows]
 
+    def delete_segment(self, segment_id: int) -> None:
+        self._conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))
+        self._conn.commit()
+
+    def ensure_calibration_copy(self, file_hash: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO segments_calibration
+                (file_hash, start_ms, end_ms, tone_label,
+                 confidence, manually_corrected)
+            SELECT file_hash, start_ms, end_ms, tone_label,
+                   confidence, manually_corrected
+            FROM segments
+            WHERE file_hash = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM segments_calibration WHERE file_hash = ?
+              )
+            """,
+            (file_hash, file_hash),
+        )
+        self._conn.commit()
+
+    def get_calibration_segments(self, file_hash: str) -> list[Segment]:
+        rows = self._conn.execute(
+            """
+            SELECT id, file_hash, start_ms, end_ms, tone_label,
+                   confidence, manually_corrected
+            FROM segments_calibration
+            WHERE file_hash = ?
+            ORDER BY start_ms
+            """,
+            (file_hash,),
+        ).fetchall()
+        return [_row_to_segment(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Presets
     # ------------------------------------------------------------------
