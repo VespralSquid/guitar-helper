@@ -1,73 +1,76 @@
-# ISSUE-005 — Choppy/slow audio playback in the PySide6 UI (Phase 4)
+# ISSUE-005 — Choppy audio playback in the PySide6 UI (Phase 4)
 
-**Status:** RESOLVED (2026-07-13) — root cause was the pyqtgraph waveform's 20 Hz scene repaint starving the audio callback of the GIL while Analysis mode was visible. Fixed by replacing the waveform with the custom-painted `SegmentTimeline`. **User audibly confirmed choppiness gone in Analysis mode.**  
-**Date:** 2026-07-08 (diagnosed), 2026-07-10 (first fix attempt), 2026-07-13 (reopened → confirmed → resolved)
+**Status:** RESOLVED (2026-07-13). Root cause: pyqtgraph's scene repaint, driven by the playhead at 20 Hz, held the GIL in long enough bursts to starve the audio callback thread. Fixed by deleting the pyqtgraph waveform and replacing it with the custom-painted `SegmentTimeline`. User audibly confirmed clean playback in Analysis mode.
+
+**Timeline:** 2026-07-08 diagnosed (from code inspection) → 2026-07-10 first fix attempt (**failed**) → 2026-07-13 root cause confirmed by controlled test → resolved in `4bdf312`.
 
 ---
 
 ## Symptom
-User reported choppy/crackly audio playback while running the new PySide6 UI (`python -m guitar_helper.run_ui --mock`) and playing back an analysed track. Playback is noticeably degraded compared to Phase 3 CLI (`run_playback.py`), which exhibited no such artifacts.
+Choppy/crackly audio during playback in the PySide6 UI (`python -m guitar_helper.run_ui`), heard as random stuttering throughout a track. The Phase 3 CLI (`run_playback.py`) played the same tracks cleanly — it has no Qt event loop, only a `time.sleep()` print loop.
 
-Audio dropouts are audible as random crackling/stuttering throughout playback, with subjective impression of sluggish responsiveness (slow seek/position updates).
+## Root cause
 
-## Root cause (GIL contention between audio callback and Qt repaint threads)
-Two threads compete for the Python GIL at nearly synchronous intervals:
+`WaveformView.set_playhead_ms()` called `InfiniteLine.setValue()`, moving a `QGraphicsItem` inside pyqtgraph's `QGraphicsScene`. That invalidated a scene region spanning the full plot height, so Qt re-invoked `paint()` on **every item intersecting it**:
 
-**1. Audio callback thread (real-time):**
-- `sounddevice.OutputStream` invokes `PlaybackEngine._callback()` on PortAudio's native thread
-- Callback acquires GIL to execute Python code in `guitar_helper/playback/playback_engine.py`
-- Current `blocksize=1024` frames at 44.1 kHz ≈ 23 ms per block — tight real-time deadline
-- No `latency` argument passed to `sd.OutputStream()` — PortAudio uses its default (minimal buffering)
+- 2× `PlotDataItem` — the 3000-column min/max envelope curves
+- 1× `FillBetweenItem`
+- N× `LinearRegionItem` — one per segment (16 on the test track)
+- the `InfiniteLine` playhead itself
 
-**2. Main thread (Qt event loop):**
-- `MainWindow._pos_timer` (QTimer) fires at 33 ms interval (`_POS_TIMER_MS = 33`)
-- Tick invokes `_on_pos_tick()` → `waveform.set_playhead_ms()`, moving a pyqtgraph `InfiniteLine`
-- pyqtgraph's custom `paint()` overrides run Python-level code holding the GIL during repaint
+Every one of those `paint()` methods is **Python code inside pyqtgraph**. The position timer fired at 20 Hz, so each second the main thread ran ~20 bursts of Python-level scene painting, holding the GIL through each burst.
 
-**Result:** When the main thread's pyqtgraph repaint work doesn't yield the GIL back in time, the audio callback misses its real-time deadline. PortAudio's output buffer underruns, producing audible choppiness. This did not occur in Phase 3 CLI because `run_playback.py` has no GUI event loop — only a `time.sleep()` print loop, zero GIL competition.
+Meanwhile `PlaybackEngine._callback()` is a **Python function** invoked from PortAudio's native callback thread. It must acquire the GIL to execute, and it cannot preempt the main thread mid-bytecode — it waits for a GIL release. The callback itself does almost nothing (one numpy slice copy into `outdata`); it simply could not get **scheduled** in time. Missed real-time deadline → PortAudio output underrun → audible crackle.
 
-## What was tried
-Nothing yet. This is a diagnosis from code inspection + symptom report, not yet confirmed via profiling (e.g. measuring audio callback latency variance or dropout counts).
+This is a GIL-scheduling problem, not a CPU-throughput problem. Additional cores cannot help: both threads contend for the same lock.
 
-## Proposed fixes (priority order — none applied yet)
-**1. (Recommended, low-risk) Increase audio callback buffering:**
-- Raise `blocksize` in `PlaybackEngine.play()` (e.g. 1024 → 2048 or 4096 frames) and/or pass `latency="high"` to `sd.OutputStream()`
-- Allows PortAudio more headroom to tolerate GIL-driven scheduling delays without underrunning
+## How it was confirmed (controlled test, 2026-07-13)
 
-**2. (Recommended, low-risk) Reduce main-thread GIL pressure:**
-- Throttle `MainWindow._pos_timer` repaint frequency (e.g. skip repaint if position hasn't moved enough, or decouple repaint interval from position-read interval)
-- Gives audio callback more consistent GIL access
+O1/O2 produced the discriminating experiment for free. Since the mode-shell refactor, `MainWindow._on_pos_tick` only updates the playhead when Analysis is the current stacked widget:
 
-**3. (After verification) Profile before/after:**
-- Instrument `PlaybackEngine._callback()` to log time-since-last-call variance before/after applying fixes 1+2
-- Rule out secondary factors (e.g. audio device sample-rate mismatch requiring host-side resampling)
+```python
+if position_ms != self._last_pos_ms:
+    if self._stack.currentWidget() is self.analysis:
+        self.analysis.set_playhead_ms(position_ms)
+```
 
-## Fix applied (2026-07-10)
-Applied fixes 1+2 together, no profiling done first (both changes are small, additive, and reversible).
+The user then observed: **playback started from Home is clean; the choppiness appears only while Analysis mode is visible.** Same audio engine, same blocksize, same `AudioBuffer`, same dispatcher thread, same everything — the single variable between the clean and choppy conditions is whether the pyqtgraph repaint runs. That isolates the cause more cleanly than the profiling originally planned (instrumenting `_callback()` inter-arrival variance) would have.
 
-**1. Audio callback buffering (`guitar_helper/playback/playback_engine.py`):**
-- `blocksize` default raised 1024 → 2048 frames
-- Added `latency="high"` to the `sd.OutputStream()` call
+## The failed fix (2026-07-10) — and what its failure proved
 
-**2. Main-thread GIL pressure (`guitar_helper/ui/main_window.py`):**
-- `_POS_TIMER_MS` raised 33 → 50 (30 Hz → 20 Hz tick rate)
-- `_on_pos_tick()` now tracks `_last_pos_ms` and skips `waveform.set_playhead_ms()` (the expensive pyqtgraph repaint) when position hasn't changed since the last tick — e.g. while paused/stopped, the timer keeps running but no longer forces a repaint. `_last_pos_ms` is reset to `None` on track load so the playhead still draws at position 0.
+Applied together, from the original code-inspection diagnosis:
+- `PlaybackEngine` `blocksize` 1024 → 2048; added `latency="high"` to `sd.OutputStream()`
+- `_POS_TIMER_MS` 33 → 50 (30 Hz → 20 Hz)
+- `_on_pos_tick()` skipped the playhead repaint when position was unchanged since the last tick
 
-**Verification:** ruff clean, full suite 152/152 passing, UI launches cleanly (`--mock`, 6s smoke run, no traceback). Audible confirmation that crackling is gone is pending — that has to be judged by ear during a manual playback session, not from this environment.
+It did not work — playback remained "super choppy". **The failure is itself evidence.** The attempt attacked the wrong term of the equation: it assumed the real-time deadline was too *tight*, and that more buffer headroom would let the callback ride out GIL jitter. But if roughly doubling the headroom (23 ms → 46 ms per block, plus a high-latency device buffer) doesn't fix it, then the GIL stall is not small jitter you can buffer around — its duration is **comparable to or longer than the block period**. The dominant term was the *cost and frequency of the paint work*, not the tightness of the deadline. No amount of buffering rescues a callback whose thread cannot acquire the GIL for a large fraction of every 50 ms window.
 
-## Current status
-Fix applied on `phase3-readiness` (restore point tagged `pre-issue-005-fix` before the change, commit `1330f25`). If the audible re-test still shows dropouts, next step is profiling per option 3 above (instrument `_callback()` timing) before trying a larger blocksize or a more invasive fix (e.g. moving pyqtgraph repaint work off critical timing, or a dedicated audio process).
+The repaint-skip half was worse than useless: **during playback the position changes on every tick**, so the skip only ever triggered while paused. It optimized the one case that was never broken.
 
-## Re-test result (2026-07-13) — fix insufficient, reopened
-After the M0 lifecycle fixes (teardown-on-reload + async load; Errors 1-3 in `List of known errors` verified fixed by the user), playback in the UI is still "super choppy and really slow". The 2026-07-10 changes (blocksize 2048, `latency="high"`, 50 ms timer, repaint-skip-when-unchanged) did not resolve it. Note the repaint skip only helps while paused — during playback the position changes every tick, so pyqtgraph still repaints at 20 Hz.
+## The fix that worked (`4bdf312`)
 
-**Next step — discriminating test (manual, by ear):** play the same track headless via the Phase 3 CLI (`python -m guitar_helper.run_playback ...`), which has no Qt event loop.
-- **Still choppy headless** → the GIL/repaint diagnosis is wrong or incomplete; suspect device/stream config (sample-rate mismatch forcing host resampling, WASAPI shared-mode behavior, blocksize) — profile `_callback()` inter-arrival variance per option 3.
-- **Clean headless** → confirms UI-side GIL/repaint contention; candidate fixes, in order: throttle playhead repaint to ~10 Hz (decouple from the 50 ms position read), verify `setValue` on the `InfiniteLine` isn't invalidating the whole plot (repaint only the line's bounding rect), and as a last resort a blocking-write playback thread (`stream.write()` releases the GIL in C, unlike the Python callback) or larger blocksize (4096+).
+The pyqtgraph waveform (`views/waveform_view.py`) and overlay (`views/segment_overlay.py`) were **deleted** and replaced by `views/segment_timeline.py::SegmentTimeline`. (The user had independently judged the waveform unnecessary for the app, so nothing of value was lost.) It attacks all three levers:
 
-Also worth ruling out cheaply: the viz queue (`Queue(maxsize=64)`) has no consumer in M1-M3, so once full every callback raises/catches `queue.Full` — believed negligible, but passing `None` until a consumer exists (O4 spectrum work) removes it from the equation.
+1. **Cost per repaint** — a plain `QWidget.paintEvent`: one `QPainter`, one `fillRect` per segment plus a playhead rect, all thin wrappers over C++ (PySide6 releases the GIL around C++ calls). No scene graph, no per-item Python `paint()`, no 3000-point path regeneration.
+2. **Repaint frequency** — pixel-gated: `set_playhead_ms()` calls `update()` only when the playhead crosses a **new pixel column**. Over a 4-minute track in a ~1100 px window that is ~1 repaint per 218 ms (≈4–5/sec), down from 20/sec.
+3. **Repaint occurrence** — mode-gated in `_on_pos_tick`: zero playhead work unless Analysis is the visible mode, so playback from Home or Output costs nothing.
 
-## Root cause confirmed (2026-07-13, natural discriminating test)
-After O2 shipped, playback initiated from Home mode is clean; the choppiness appears **only while Analysis mode is visible**. Since O1, `MainWindow._on_pos_tick` skips the playhead update unless Analysis is the current stacked widget — so the only difference between the two conditions is the pyqtgraph repaint (`InfiniteLine.setValue` → scene invalidation → Python-level `paint()` at 20 Hz holding the GIL). This is the UI-side GIL/repaint contention outcome of the discriminating test, observed in normal use rather than via the headless CLI.
+Also removed, as hygiene rather than cause: the engine's `viz_queue` is now passed `None` (`Application.attach`). The `Queue(maxsize=64)` had no consumer in M1–M3, so once full every audio callback paid a `queue.Full` raise/catch for nothing. **This was never the cause** — it was mode-independent and therefore could not explain a symptom that only appeared in Analysis. It will be reconnected when a spectrum consumer exists (O4).
 
-**Fix (in progress):** the user also independently judged the waveform unnecessary for the app. The pyqtgraph waveform + segment overlay are replaced by `SegmentTimeline` — a custom `QWidget.paintEvent` that draws one colored rect per segment plus a playhead line, repainting only when the playhead crosses a pixel column (~few repaints/sec instead of 20 scene-graph repaints/sec, and each repaint is trivially cheap). The always-full, consumer-less viz queue is also disconnected from the engine (`viz_queue=None`) until a spectrum consumer exists. Audible confirmation in Analysis mode pending user re-test.
+## Verification
+- User audibly confirmed choppiness is gone **in Analysis mode** (the previously failing condition), 2026-07-13.
+- 194 tests passing, ruff clean.
+- `tests/test_segment_timeline.py` covers the ms↔x mapping and the pixel-gating (repaint only on column change).
+
+## Residue / follow-ups
+
+**1. The failed fix's buffering changes — REVERTED 2026-07-14.** `blocksize=2048` and `latency="high"` had been carried into `4bdf312` and were never the fix. They are not free: `PositionTracker` is set to the **end** of the block just handed to PortAudio, so the reported position already runs *ahead* of what is audible by roughly one block plus the device output latency. `MidiDispatcher` then adds its deliberate 75 ms lookahead on top. Bigger blocks and a high-latency device buffer widen that gap, so amp preset changes fire earlier relative to the audible tone boundary.
+
+Reverted to `blocksize=1024`, `latency` unset. **Live re-test passed** (2026-07-14, carry_on_my_wayward_son with real MIDI): no choppiness, and preset switches subjectively land on time. Judged by ear only — no ms-level measurement was taken, and none is warranted unless a switch starts feeling early. As expected, dropping the buffering caused no choppiness regression: buffering was never what fixed it.
+
+**2. Documentation.** `docs/Report/phase4-ui-architecture.md` (written 2026-07-10) describes the pre-rework M1–M3 code and is left **unedited as a historical snapshot**, including the diagnosis that led here. Current behaviour is documented in `docs/Report/phase4-rework-report.md`.
+
+## Lessons
+- **A diagnosis from code inspection is a hypothesis, not a cause.** The 2026-07-08 write-up named the right two threads and still prescribed a fix that could not work, because it mis-attributed which side of the contention was the dominant term.
+- **Prefer the discriminating test to more mitigation.** The single fact that settled this — *choppy only when Analysis is visible* — was worth more than both mitigation rounds combined, and it cost nothing to observe.
+- **A real-time Python callback cannot share the GIL with a busy Qt paint path.** Keep main-thread paint work either cheap (C++-side calls) or rare (pixel/event gating). Ideally both, which is what `SegmentTimeline` does.

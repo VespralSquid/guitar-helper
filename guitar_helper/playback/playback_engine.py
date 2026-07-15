@@ -23,7 +23,7 @@ class PlaybackEngine:
         buffer: AudioBuffer,
         tracker: PositionTracker,
         viz_queue: queue.Queue | None = None,
-        blocksize: int = 2048,
+        blocksize: int = 1024,
     ) -> None:
         self._buffer = buffer
         self._tracker = tracker
@@ -39,11 +39,15 @@ class PlaybackEngine:
 
     def play(self) -> None:
         if self._stream is None:
+            # Default (low) latency, small blocksize: the tracker reports the END of
+            # the block just queued, so it already leads the audible position by one
+            # block + device latency, and MidiDispatcher adds 75ms lookahead on top.
+            # Buffering does not cure GIL starvation (ISSUE-005) — it only fires
+            # preset changes earlier. Keep this tight.
             self._stream = sd.OutputStream(
                 samplerate=self._buffer.sr,
                 channels=self._buffer.n_channels,
                 blocksize=self._blocksize,
-                latency="high",
                 callback=self._callback,
             )
         if not self._stream.active:
