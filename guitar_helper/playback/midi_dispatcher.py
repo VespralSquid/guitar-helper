@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 from guitar_helper.db.interfaces import IPresetStore
 from guitar_helper.midi.interfaces import IMidiPort
+from guitar_helper.playback.latency_probe import DispatchProbe
 from guitar_helper.playback.position_tracker import PositionTracker
 from guitar_helper.playback.segment_lookup import SegmentLookup
 
@@ -32,6 +34,7 @@ class MidiDispatcher:
         channel: int = 0,
         lookahead_ms: int = 75,
         poll_interval_s: float = 0.05,
+        probe: DispatchProbe | None = None,
     ) -> None:
         self._lookup = lookup
         self._tracker = tracker
@@ -39,12 +42,21 @@ class MidiDispatcher:
         self._channel = channel
         self._lookahead_ms = lookahead_ms
         self._poll_interval_s = poll_interval_s
+        self._probe = probe
         self._pc_by_tone = {p.tone_label: p.pc_number for p in store.get_presets()}
 
         self._last_tone: str | None = None
         self._last_pc: int | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+
+    @property
+    def lookahead_ms(self) -> int:
+        return self._lookahead_ms
+
+    @property
+    def poll_interval_s(self) -> float:
+        return self._poll_interval_s
 
     def tick(self) -> None:
         """One poll/decide/dispatch step. Thread loop calls this; tests call it directly."""
@@ -68,7 +80,12 @@ class MidiDispatcher:
             return
 
         if pc != self._last_pc:
-            self._port.send_program_change(self._channel, pc)
+            if self._probe is not None:
+                t0 = time.perf_counter()
+                self._port.send_program_change(self._channel, pc)
+                self._probe.send_ms.add((time.perf_counter() - t0) * 1000.0)
+            else:
+                self._port.send_program_change(self._channel, pc)
             self._last_pc = pc
             logger.info("Dispatched PC %d (%s) at %dms.", pc, tone, position_ms)
 
@@ -94,5 +111,10 @@ class MidiDispatcher:
             self._thread = None
 
     def _run(self) -> None:
+        last = time.perf_counter()
         while not self._stop.wait(self._poll_interval_s):
+            if self._probe is not None:
+                now = time.perf_counter()
+                self._probe.poll_ms.add((now - last) * 1000.0)
+                last = now
             self.tick()

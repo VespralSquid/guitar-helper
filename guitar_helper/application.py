@@ -17,6 +17,7 @@ from guitar_helper.db.schema import init_db
 from guitar_helper.midi.interfaces import IMidiPort
 from guitar_helper.midi.mido_port import DEFAULT_PORT_NAME, MidoPort
 from guitar_helper.playback.audio_buffer import AudioBuffer
+from guitar_helper.playback.latency_probe import DispatchProbe
 from guitar_helper.playback.midi_dispatcher import MidiDispatcher
 from guitar_helper.playback.playback_engine import PlaybackEngine
 from guitar_helper.playback.position_tracker import PositionTracker
@@ -41,6 +42,9 @@ class Application:
     ) -> None:
         self.config = config
         self.channel = channel
+        # None in normal runs; the latency-measurement CLI sets this before
+        # attach() so the dispatcher records poll jitter and send cost.
+        self.dispatch_probe: DispatchProbe | None = None
         self._loader = loader or AudioLoader()
         self._conn = None
         if store is None:
@@ -83,7 +87,8 @@ class Application:
         self.engine = PlaybackEngine(buffer, self.tracker, None)
         self.lookup = SegmentLookup(self.store, file_hash)
         self.dispatcher = MidiDispatcher(
-            self.store, self.lookup, self.tracker, self.port, channel=self.channel
+            self.store, self.lookup, self.tracker, self.port,
+            channel=self.channel, probe=self.dispatch_probe,
         )
 
     def load(self, path: str | Path) -> str:

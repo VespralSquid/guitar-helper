@@ -33,6 +33,13 @@ class PlaybackEngine:
         self._lock = threading.Lock()
         self._stream: sd.OutputStream | None = None
 
+        # Instrumentation (harmless in production, read by the latency probe):
+        # how far the tracker cursor leads the audible position, measured live
+        # from PortAudio's DAC clock. Single float writes from the callback keep
+        # it non-blocking. 0.0 until the first callback / when the backend does
+        # not report DAC times.
+        self.last_tracker_lead_ms: float = 0.0
+
     # ------------------------------------------------------------------
     # Transport
     # ------------------------------------------------------------------
@@ -77,6 +84,16 @@ class PlaybackEngine:
     def is_playing(self) -> bool:
         return self._stream is not None and self._stream.active
 
+    @property
+    def reported_output_latency_ms(self) -> float | None:
+        """PortAudio's own estimate of output latency for the open stream (ms).
+
+        A coarse cross-check for the live per-callback ``last_tracker_lead_ms``;
+        None before the stream is opened."""
+        if self._stream is None:
+            return None
+        return float(self._stream.latency) * 1000.0
+
     # ------------------------------------------------------------------
     # Audio thread
     # ------------------------------------------------------------------
@@ -94,6 +111,16 @@ class PlaybackEngine:
             outdata[n:] = 0.0
 
         self._tracker.set_cursor(end)
+
+        # Tracker leads the audible position: this block's END plays at
+        # outputBufferDacTime + frames/sr, but the cursor already reads `end`.
+        # PortAudio zeroes the DAC clock on some backends (and tests pass None) —
+        # skip those samples.
+        if time_info is not None:
+            dac_lead = time_info.outputBufferDacTime - time_info.currentTime
+            if dac_lead > 0.0:
+                self.last_tracker_lead_ms = (dac_lead + frames / self._buffer.sr) * 1000.0
+
         if self._viz_queue is not None:
             try:
                 self._viz_queue.put_nowait((start, chunk))
