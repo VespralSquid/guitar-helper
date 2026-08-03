@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
+from PySide6.QtCore import Qt  # noqa: E402
+
 from guitar_helper.analysis.audio_loader import AudioLoader  # noqa: E402
 from guitar_helper.application import Application  # noqa: E402
 from guitar_helper.config import AppConfig  # noqa: E402
@@ -408,3 +410,93 @@ def test_timer_stops_on_close(window, qtbot):
     win._on_pos_tick()  # must not touch the audio device
     win.close()
     assert not win._pos_timer.isActive()
+
+
+# ----------------------------------------------------------------------
+# O4: Output mode wiring
+# ----------------------------------------------------------------------
+
+def test_dispatch_timer_runs_only_while_output_is_visible(window):
+    """Same reasoning as the Analysis playhead skip: no periodic work for a
+    view nobody is looking at."""
+    win, _ = window
+    assert not win._dispatch_timer.isActive()
+
+    win.sidebar.setCurrentRow(MODE_OUTPUT)
+    assert win._dispatch_timer.isActive()
+
+    win.sidebar.setCurrentRow(MODE_HOME)
+    assert not win._dispatch_timer.isActive()
+
+
+def test_entering_output_shows_events_buffered_while_it_was_hidden(window, qtbot):
+    """The log is a deque that keeps filling with Output closed, so opening it
+    must not start from an empty screen."""
+    win, _ = window
+    _play_row(win, qtbot, 0)
+    win._app.tracker.set_cursor(0)
+    win._app.dispatcher.tick()
+
+    win.sidebar.setCurrentRow(MODE_OUTPUT)
+
+    assert win.output.log_list.count() >= 1
+    assert "PC 0" in win.output.log_list.item(0).text()
+    assert "clean" in win.output.active_label.text()
+
+
+def test_preset_edit_reaches_the_live_dispatcher(window, qtbot):
+    """End-to-end for the O4 promise: remap a PC in Output and the track that is
+    already playing dispatches the new number without a reload."""
+    win, _ = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_OUTPUT)
+
+    row = next(
+        i for i, p in enumerate(win.output.preset_model.presets) if p.tone_label == "metal"
+    )
+    index = win.output.preset_model.index(row, 2)
+    win.output.preset_model.setData(index, "11", Qt.ItemDataRole.EditRole)
+
+    # set_cursor takes frames; land in the second half, which is the metal segment.
+    win._app.tracker.set_cursor(int(win._app.buffer.sr * 1.1))
+    win._app.dispatcher.tick()
+
+    assert (0, 11) in win._app.port.sent
+
+
+def test_offset_change_persists_and_reaches_the_dispatcher(window, qtbot):
+    win, _ = window
+    _play_row(win, qtbot, 0)
+    win.sidebar.setCurrentRow(MODE_OUTPUT)
+
+    win.output.offset_spin.setValue(22)
+    win.output.apply_offset_button.click()
+
+    assert win._app.dispatcher.lookahead_ms == 22
+    assert win._app.store.get_int_setting("dispatch_offset_ms", 75) == 22
+
+
+def test_output_seeds_its_spinbox_from_the_persisted_offset(window, qtbot, tmp_path):
+    win, _ = window
+    win._app.store.set_setting("dispatch_offset_ms", "31")
+
+    cfg = AppConfig.resolve(tmp_path)
+    application = Application(cfg, store=win._app.store, port=MockMidiPort())
+    restarted = MainWindow(application)
+    qtbot.addWidget(restarted)
+
+    assert restarted.output.offset_spin.value() == 31
+    restarted.close()
+
+
+def test_test_send_button_reaches_the_midi_port(window, qtbot):
+    """The ISSUE-004 diagnostic: prove the chain responds with nothing playing."""
+    win, _ = window
+    win.sidebar.setCurrentRow(MODE_OUTPUT)
+    row = next(
+        i for i, p in enumerate(win.output.preset_model.presets) if p.tone_label == "metal"
+    )
+    win.output.preset_table.selectRow(row)
+    win.output.test_send_button.click()
+
+    assert win._app.port.sent == [(0, 4)]

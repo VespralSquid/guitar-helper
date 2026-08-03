@@ -420,3 +420,32 @@ def test_duplicate_playlist_name_raises(store):
 def test_list_tracks_includes_analysed_at(store, track_hash):
     track = store.list_tracks()[0]
     assert track.analysed_at.startswith("2026-01-01")
+
+
+# ----------------------------------------------------------------------
+# Settings (schema v9, O4)
+# ----------------------------------------------------------------------
+
+def test_setting_roundtrip(store):
+    store.set_setting("dispatch_offset_ms", "40")
+    assert store.get_setting("dispatch_offset_ms") == "40"
+
+
+def test_get_setting_returns_none_when_unset(store):
+    assert store.get_setting("never_written") is None
+
+
+def test_set_setting_overwrites(store):
+    store.set_setting("dispatch_offset_ms", "40")
+    store.set_setting("dispatch_offset_ms", "-15")
+    assert store.get_int_setting("dispatch_offset_ms", 75) == -15
+
+
+def test_get_int_setting_uses_default_when_unset(store):
+    assert store.get_int_setting("dispatch_offset_ms", 75) == 75
+
+
+def test_get_int_setting_falls_back_on_garbage(store):
+    """A hand-edited DB must not stop the app from starting."""
+    store.set_setting("dispatch_offset_ms", "not-a-number")
+    assert store.get_int_setting("dispatch_offset_ms", 75) == 75

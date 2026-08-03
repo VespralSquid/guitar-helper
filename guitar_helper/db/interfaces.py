@@ -122,6 +122,24 @@ class IPresetStore(ABC):
         """Insert or replace a preset row."""
 
 
+class ISettingsStore(ABC):
+    """Persisted app-level knobs (Phase 4 O4). Key/value, so adding a knob is
+    never a schema change. Values are strings; typed accessors do the parsing
+    and fall back to the default when a key is absent or malformed."""
+
+    @abstractmethod
+    def get_setting(self, key: str) -> str | None:
+        """Return the stored value for key, or None if never set."""
+
+    @abstractmethod
+    def set_setting(self, key: str, value: str) -> None:
+        """Insert or replace the value for key."""
+
+    @abstractmethod
+    def get_int_setting(self, key: str, default: int) -> int:
+        """Return key as an int, or default if unset or unparseable."""
+
+
 class IPlaylistStore(ABC):
     """Playlist CRUD + ordered membership (Phase 4 O2). The queue itself is
     in-memory session state — only playlists persist."""
@@ -153,5 +171,12 @@ class IPlaylistStore(ABC):
 
 class ISegmentStore(ITrackCatalog, ISegmentReader, ISegmentEditor, IPresetStore):
     """Deprecated combined alias, kept for consumers that genuinely span
-    multiple roles (composition root, analysis pipeline, correction CLI).
+    multiple roles (analysis pipeline, correction CLI).
     New code should type-hint the specific role ABC it needs instead."""
+
+
+class IAppStore(ISegmentStore, ISettingsStore):
+    """What the composition root binds: the segment/track/preset roles plus
+    persisted settings. Kept separate from ISegmentStore so implementers that
+    only handle segments (test doubles, the analysis pipeline) are not forced
+    to grow settings methods they never call."""

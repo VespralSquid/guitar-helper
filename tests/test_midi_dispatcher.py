@@ -5,6 +5,7 @@ import time
 
 from guitar_helper.db.interfaces import Preset
 from guitar_helper.midi.mock_port import MockMidiPort
+from guitar_helper.playback.dispatch_log import GAP, HOLD, SEND, UNMAPPED, DispatchEvent
 from guitar_helper.playback.midi_dispatcher import MidiDispatcher
 from guitar_helper.playback.position_tracker import PositionTracker
 from guitar_helper.playback.segment_lookup import SegmentLookup
@@ -103,3 +104,132 @@ def test_dispatch_loop_runs_on_its_own_thread(store, track_hash):
     time.sleep(0.1)
     dispatcher.stop()
     assert (0, 4) in port.sent
+
+
+# ----------------------------------------------------------------------
+# O4: dispatch log sink, live lookahead, preset-map refresh
+# ----------------------------------------------------------------------
+
+def _setup_logged(store, track_hash, segments, lookahead_ms=0):
+    store.save_segments(track_hash, segments)
+    tracker = PositionTracker(sr=1000)
+    lookup = SegmentLookup(store, track_hash)
+    port = MockMidiPort()
+    events: list[DispatchEvent] = []
+    dispatcher = MidiDispatcher(
+        store, lookup, tracker, port, lookahead_ms=lookahead_ms, log_sink=events.append
+    )
+
+    def tick_at(ms: int) -> None:
+        tracker.set_cursor(ms)
+        dispatcher.tick()
+
+    return dispatcher, port, events, tick_at
+
+
+def test_log_sink_is_optional(store, track_hash):
+    """Existing construction paths pass no sink; the dispatcher must not care."""
+    _, _, port, tick_at = _setup(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+    ])
+    tick_at(0)
+    assert port.sent == [(0, 0)]
+
+
+def test_log_records_send_with_tone_and_pc(store, track_hash):
+    _, _, events, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 1000, 2000, "metal"),
+    ])
+    tick_at(0)
+    tick_at(1000)
+
+    assert [(e.kind, e.tone, e.pc) for e in events] == [
+        (SEND, "clean", 0),
+        (SEND, "metal", 4),
+    ]
+
+
+def test_log_records_hold_for_other(store, track_hash):
+    """The diagnostic value of the log: a held 'other' is visible, so a silent
+    amp is distinguishable from a dispatcher that never ran."""
+    _, port, events, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 1000, 2000, "other"),
+    ])
+    tick_at(0)
+    tick_at(1000)
+
+    assert port.sent == [(0, 0)]
+    assert [e.kind for e in events] == [SEND, HOLD]
+    assert events[1].tone == "other"
+
+
+def test_log_records_gap_between_segments(store, track_hash):
+    _, _, events, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 2000, 3000, "metal"),
+    ])
+    tick_at(0)
+    tick_at(1500)  # no segment covers this
+
+    assert [e.kind for e in events] == [SEND, GAP]
+    assert events[1].tone is None
+
+
+def test_log_records_unmapped_tone(store, track_hash):
+    store.save_segments(track_hash, [make_segment(track_hash, 0, 1000, "clean")])
+    tracker = PositionTracker(sr=1000)
+    lookup = SegmentLookup(store, track_hash)
+    events: list[DispatchEvent] = []
+    dispatcher = MidiDispatcher(
+        store, lookup, tracker, MockMidiPort(), lookahead_ms=0, log_sink=events.append
+    )
+    dispatcher.set_pc_map({})  # tone present in segments, absent from presets
+
+    tracker.set_cursor(0)
+    dispatcher.tick()
+
+    assert [e.kind for e in events] == [UNMAPPED]
+    assert events[0].tone == "clean"
+
+
+def test_logged_position_matches_the_boundary_not_the_cursor(store, track_hash):
+    """With lookahead the PC is sent early, but the log must read as the boundary
+    the user sees in the segment table — otherwise every entry looks off by the
+    lookahead."""
+    _, _, events, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 1000, 2000, "metal"),
+    ], lookahead_ms=75)
+    tick_at(0)
+    tick_at(925)  # cursor 75ms early; lookahead lands exactly on the boundary
+
+    assert events[-1].kind == SEND
+    assert events[-1].position_ms == 1000
+
+
+def test_lookahead_setter_changes_firing_point(store, track_hash):
+    dispatcher, port, _, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 1000, 2000, "metal"),
+    ], lookahead_ms=0)
+    tick_at(0)
+    dispatcher.lookahead_ms = 200
+    tick_at(800)  # 800 + 200 lands on the metal boundary
+
+    assert port.sent == [(0, 0), (0, 4)]
+
+
+def test_set_pc_map_takes_effect_without_rebuild(store, track_hash):
+    """A preset edit in Output must reach the dispatcher already driving the
+    playing track."""
+    dispatcher, port, _, tick_at = _setup_logged(store, track_hash, [
+        make_segment(track_hash, 0, 1000, "clean"),
+        make_segment(track_hash, 1000, 2000, "metal"),
+    ])
+    tick_at(0)
+    dispatcher.set_pc_map({"clean": 0, "metal": 9})
+    tick_at(1000)
+
+    assert port.sent == [(0, 0), (0, 9)]

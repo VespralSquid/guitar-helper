@@ -65,9 +65,14 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 
 CREATE INDEX IF NOT EXISTS idx_pt_order
     ON playlist_tracks(playlist_id, position);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
-_CURRENT_VERSION = 8
+_CURRENT_VERSION = 9
 
 _DEFAULT_PRESETS = [
     ("clean",     "Clean",            0),
@@ -195,6 +200,18 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v8_to_v9(conn: sqlite3.Connection) -> None:
+    # App settings (Phase 4 O4) — key/value so a new knob never needs a column.
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        """
+    )
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -203,6 +220,7 @@ _MIGRATIONS = {
     6: _migrate_v5_to_v6,
     7: _migrate_v6_to_v7,
     8: _migrate_v7_to_v8,
+    9: _migrate_v8_to_v9,
 }
 
 

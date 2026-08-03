@@ -147,13 +147,29 @@ New shape (AC7/8, revised 2026-07-13 — waveform REMOVED):
   song-by-song; merge preserves originals in `segments_calibration`; re-analysis
   guard still honors corrections.
 
-### O4 — Output (absorbs old M6)
-- Preset panel: view/edit `presets` rows (PC numbers only — **no CC/channel schema
-  change**; writes via `save_preset`).
-- `DispatchLogBuffer` (`deque(maxlen=200)`), optional `log_sink` on `MidiDispatcher`
-  (default `None`, existing tests untouched), `_dispatch_timer` (~100 ms) draining into
-  a live log + active-preset indicator — the ISSUE-004 diagnostic view.
-- _Demo:_ watch every PC send/hold with timestamps while a track plays.
+### O4 — Output ✅ (done 2026-08-03; absorbs old M6)
+- Preset panel: view/edit `presets` rows — PC numbers **and** preset names (no CC/channel
+  schema change; writes via `save_preset`). Names were added to O4 scope so rows can be
+  labelled with the actual amp patch. Validation is Qt-free in
+  `ui/editor/preset_validation.py`: PC 0-127, no duplicate mapping, `other` locked at -1.
+- Per-row **test-send** — fires the selected PC straight at the port with nothing playing.
+  Not in the original scope; added because it is the cheapest possible ISSUE-004 probe.
+- `DispatchLogBuffer` (`deque(maxlen=200)`, `playback/dispatch_log.py`), optional
+  `log_sink` on `MidiDispatcher` (default `None`, existing tests untouched),
+  `_dispatch_timer` (100 ms, running only while Output is visible) draining into a live
+  log + active-preset indicator — the ISSUE-004 diagnostic view. Every decision is
+  logged, holds and gaps included, not only sends.
+- **Dispatch offset knob** (added to O4): schema **v9** `settings(key, value)` +
+  `ISettingsStore`; the hardcoded `lookahead_ms=75` becomes a persisted, live-applied
+  `dispatch_offset_ms` with one-step Revert. This is the correction half of
+  `docs/Report/latency-calibration-analysis.md` — the QOL calibrate *wizard* stays
+  deferred, this is the engine under it.
+- ISP note: `ISettingsStore` is **not** folded into `ISegmentStore`; a new
+  `IAppStore` composes the two for the composition root. Folding it broke
+  `test_pipeline`'s `MockStore`, which is precisely the fat-interface failure §1.2
+  identified.
+- _Demo:_ watch every PC send/hold with timestamps while a track plays; remap a PC and
+  hear the change without reloading the song.
 
 ### Deferred
 Spectrum + lyrics (old M7), CC/channel mapping, queue persistence, `ambient` preset

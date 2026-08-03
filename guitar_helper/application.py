@@ -11,18 +11,21 @@ from pathlib import Path
 
 from guitar_helper.analysis.audio_loader import AudioLoader
 from guitar_helper.config import AppConfig
-from guitar_helper.db.interfaces import ISegmentStore
+from guitar_helper.db.interfaces import IAppStore
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
 from guitar_helper.midi.interfaces import IMidiPort
 from guitar_helper.midi.mido_port import DEFAULT_PORT_NAME, MidoPort
 from guitar_helper.playback.audio_buffer import AudioBuffer
+from guitar_helper.playback.dispatch_log import DispatchLogBuffer
 from guitar_helper.playback.latency_probe import DispatchProbe
-from guitar_helper.playback.midi_dispatcher import MidiDispatcher
+from guitar_helper.playback.midi_dispatcher import DEFAULT_LOOKAHEAD_MS, MidiDispatcher
 from guitar_helper.playback.playback_engine import PlaybackEngine
 from guitar_helper.playback.position_tracker import PositionTracker
 from guitar_helper.playback.segment_lookup import SegmentLookup
 from guitar_helper.playback.visualization_bridge import VisualizationBridge
+
+DISPATCH_OFFSET_KEY = "dispatch_offset_ms"
 
 
 class NoSegmentsError(RuntimeError):
@@ -34,7 +37,7 @@ class Application:
         self,
         config: AppConfig,
         *,
-        store: ISegmentStore | None = None,
+        store: IAppStore | None = None,
         port: IMidiPort | None = None,
         loader: AudioLoader | None = None,
         port_name: str = DEFAULT_PORT_NAME,
@@ -53,12 +56,44 @@ class Application:
         self.store = store
         self.port = port or MidoPort(port_name)
         self.viz = VisualizationBridge()
+        # Survives track changes — the dispatcher is rebuilt per track, the log
+        # is not, so the Output panel keeps its history across a load.
+        self.dispatch_log = DispatchLogBuffer()
+
+        self._dispatch_offset_ms = self.store.get_int_setting(
+            DISPATCH_OFFSET_KEY, DEFAULT_LOOKAHEAD_MS
+        )
 
         self.buffer: AudioBuffer | None = None
         self.tracker: PositionTracker | None = None
         self.engine: PlaybackEngine | None = None
         self.lookup: SegmentLookup | None = None
         self.dispatcher: MidiDispatcher | None = None
+
+    @property
+    def dispatch_offset_ms(self) -> int:
+        """How far ahead of a tone boundary the Program Change is sent.
+
+        The single calibration knob of `docs/Report/latency-calibration-analysis.md`
+        (`L_chain + poll_wait − L_out`), persisted so a rig is calibrated once.
+        """
+        return self._dispatch_offset_ms
+
+    def set_dispatch_offset_ms(self, value: int) -> None:
+        """Persist the offset and apply it to the running dispatcher, so a
+        calibration change is audible on the current track without a reload."""
+        self._dispatch_offset_ms = int(value)
+        self.store.set_setting(DISPATCH_OFFSET_KEY, str(self._dispatch_offset_ms))
+        if self.dispatcher is not None:
+            self.dispatcher.lookahead_ms = self._dispatch_offset_ms
+
+    def reload_presets(self) -> None:
+        """Push edited tone->PC mappings into the live dispatcher. The store read
+        happens here, on the main thread — the dispatcher thread never sees SQLite."""
+        if self.dispatcher is not None:
+            self.dispatcher.set_pc_map(
+                {p.tone_label: p.pc_number for p in self.store.get_presets()}
+            )
 
     def decode(self, path: str | Path) -> tuple[str, AudioBuffer]:
         """Hash and fully decode a file. Touches no DB, Qt, or playback state,
@@ -89,6 +124,8 @@ class Application:
         self.dispatcher = MidiDispatcher(
             self.store, self.lookup, self.tracker, self.port,
             channel=self.channel, probe=self.dispatch_probe,
+            lookahead_ms=self.dispatch_offset_ms,
+            log_sink=self.dispatch_log.record,
         )
 
     def load(self, path: str | Path) -> str:

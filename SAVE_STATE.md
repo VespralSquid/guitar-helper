@@ -1,7 +1,7 @@
 # Save State — Guitar Helper
-_Last updated: 2026-07-21_
+_Last updated: 2026-08-03_
 
-Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (committed). ISSUE-004 and ISSUE-005 both RESOLVED.** Branch `phase4-o3-analysis`, ruff clean. Latency-measurement tooling added on top of O3 (uncommitted). Next: run the measurement on the real rig, then O4.
+Status: **Phase 1+2+3 DONE. Phase 4 M0+O1+O2+O3+O4 ALL DONE — the milestone roadmap of `phase4-overhaul-plan.md` is complete.** On `main`, 370 tests passing, ruff clean. ISSUE-004/005 RESOLVED. Remaining Phase 4 work is the QOL pass (`docs/new feature specs/Phase_4_QOL_changes.md`), not a milestone.
 
 ---
 
@@ -24,7 +24,7 @@ Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (committed). ISSUE-0
 - **Schema v6** + migrations loop. File locator re-finds moved tracks by hash. Silence gate routes low RMS to `other`. Calibration = mean.
 - **CI:** `python-rtmidi` → `requirements-runtime.txt`. CI uses `requirements.txt` only; tests use `MockMidiPort`. pytest-qt added.
 - **Pkgs:** `guitar_helper/midi/` (IMidiPort, MockMidiPort, MidoPort) + `guitar_helper/playback/` (AudioBuffer, PositionTracker, PlaybackEngine, SegmentLookup, VisualizationBridge, MidiDispatcher). Composition root `guitar_helper/application.py`; CLI `run_playback.py`.
-- **Key design:** SegmentLookup snapshots at construction (in-memory bisect, not per-tick DB queries). MidiDispatcher own thread, 75ms lookahead, on-change-only dispatch from presets table. PlaybackEngine callback strictly non-blocking.
+- **Key design:** SegmentLookup snapshots at construction (in-memory bisect, not per-tick DB queries) — this is why segment edits need a song reload to take effect (QOL item). MidiDispatcher own thread, on-change-only dispatch from presets table, lookahead now the persisted `dispatch_offset_ms` (was hardcoded 75 until O4). PlaybackEngine callback strictly non-blocking.
 - **MidoPort** opens `'loopMIDI Port 1'` (app SENDS, host receives). App-side dispatch verified correct (PCs logged: carry_on_my_wayward_son shows other@98s, PC0@99.9s, PC4@113s, PC0@124.5s). VST3 limitation discovered; see ISSUE-004 RESOLVED.
 - Tests: 133 passing, ruff clean. MidoPort test skipped in CI (`importorskip("rtmidi")`).
 
@@ -35,28 +35,33 @@ Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (committed). ISSUE-0
 - O1: MainWindow shell (sidebar QListWidget + QStackedWidget: Home/Analysis/Media/Output modes) + persistent transport. Analysis mode auto-selected on load; playhead repaint skipped when hidden. QueueState (Qt-free, injectable rng); QueueSidebar (now-playing text, queue list, Shuffle/Repeat/Up/Down/Play-next/Clear). ISSUE-005 FIX: SegmentTimeline replaces pyqtgraph waveform (playhead repaints only per pixel-column, not 20Hz). 
 - O2: schema v7→v8 (playlists, playlist_tracks, ON DELETE CASCADE). Home = playlist-first: virtual "Library" + real playlists; double-click song → load+autoplay, queue seeded from shown playlist, STAYS in Home. Shell wiring: _pending_queue after attach; File→Open single-track fallback; track-finished via _on_pos_tick (_was_playing flag + position ≥ duration−50ms). Verified 194 tests, LIVE db migrated v6→v8 OK (9 tracks/129 segments/corrections intact).
 
-## Phase 4 O3 (Analysis) — steps 1-9/9 DONE (committed)
-- **Step 1: ISP interface split** — `ISegmentStore` (11 methods) → 4 role interfaces: `ITrackCatalog`, `ISegmentReader`, `ISegmentEditor`, `IPresetStore`. Kept deprecated `ISegmentStore` alias for backward-compat.
-- **Step 2: calibration-copy store methods** — `delete_segment`, `ensure_calibration_copy` (idempotent snapshot), `get_calibration_segments` on `ISegmentEditor`.
-- **Step 3: `ui/editor/validation.py`** — Qt-free EditResult, validate/apply ops (relabel/boundary/confirm). GUI relabeling = dropdown from TONE_LABELS.
-- **Step 4: `ui/editor/merge.py`** — Qt-free MergePlan, find_same_tone_run, merge_run. Kept physical merge (virtual already at dispatch time).
-- **Step 5: EditorState edit ops** — relabel/edit_boundary/confirm/confirm_all/merge_run/set_excluded/save/discard; dirty/excluded properties. Pattern: validate → mutate → queue pending/deleted → emit StateEvent.
-- **Step 6: SegmentTimeline boundary dragging** — Added `validate_boundary_move`/`apply_boundary_move` to validation.py, `EditorState.move_boundary()`. SegmentTimeline: `boundary_at_x` hit-tester (Qt-free, unit-testable), drag state machine with live preview, cursor swap to SizeHorCursor. REGRESSION CAUGHT: existing test clicked exact pixel that became boundary hit-zone → fixed by moving test click position.
-- **Step 7: AnalysisMode UI wiring** — relabel QComboBox (dropdown-only, uses textActivated to avoid feedback loop), Confirm/Confirm-All/Merge buttons, Exclude checkbox, dirty label, Save/Discard buttons. Wired through new signals to main_window.py; validation rejections surface via 4-second status-bar message. REGRESSION CAUGHT: `set_playhead_ms` accidentally dropped during rewrite, restored by fixing smoke-test AttributeError.
-- **Step 8: playlist-scoped Analysis (AC7)** — Home "Analyze" button acts on selected playlist; AnalysisMode got header bar + Prev/Next for playlist paging (separate from Transport's queue Prev/Next). main_window.py gained `_enter_playlist_analysis()` + `_confirm_discard_if_dirty()` guard. SCOPING DECISION (user confirmed): dirty-guard only on new playlist Analyze/Prev/Next, NOT retrofitted onto existing O2 queue Prev/Next or Home double-click (known gap, accepted).
-- **Step 9: test-gap closure + acceptance** — E2E integration tests: boundary-drag-to-store, exclude-toggle-to-store, confirm-all-to-store, discard. "Kitchen sink" test: relabel→boundary→confirm→merge→save chain. Test proving re-analysis guard causally honors corrections after GUI edit. USER verified live app: no bugs/errors (after venv activation fix).
-- **O3 architecture:** ISP split decomposed ISegmentStore into 4 role interfaces; O3 store methods on ISegmentEditor. Qt-free core (validation.py, merge.py, editor_state.py) fully unit-tested; Qt layer tested via pytest-qt (isolated widgets + full E2E).
+## Phase 4 O3 (Analysis) — DONE, committed (see git for the 9-step detail)
+- ISP split: `ISegmentStore` (11 methods) → `ITrackCatalog`/`ISegmentReader`/`ISegmentEditor`/`IPresetStore`; deprecated alias kept.
+- Schema v7 `segments_calibration` + idempotent `ensure_calibration_copy` (lazy pre-edit snapshot). Merge is physical; originals preserved in the snapshot.
+- Qt-free core (`validation.py`, `merge.py`, `editor_state.py`) unit-tested; Qt layer via pytest-qt. Boundary dragging lives on SegmentTimeline (`boundary_at_x` hit-tester is Qt-free).
+- SCOPING DECISION (user confirmed): dirty-guard applies only to playlist Analyze/Prev/Next, NOT to O2 queue Prev/Next or Home double-click. Known gap, accepted.
+- USER verified live app, no bugs.
 
-## Latency calibration — measure phase DONE 2026-07-21, correction PENDING
+## Phase 4 O4 (Output) — DONE 2026-08-03
+- **Schema v9**: `settings(key, value)` + `ISettingsStore` role ABC. New `IAppStore = ISegmentStore + ISettingsStore` for the composition root — settings deliberately NOT folded into `ISegmentStore` (doing so broke test_pipeline's MockStore, which is exactly the ISP violation the O3 split exists to prevent).
+- **`playback/dispatch_log.py`**: `DispatchEvent` + bounded thread-safe `DispatchLogBuffer` (deque 200). Records EVERY decision — send/hold/unmapped/gap — so a silent amp is distinguishable from a silent dispatcher. `last_send` survives `drain()` so the active-preset indicator is right for a viewer arriving after the switch.
+- **MidiDispatcher**: opt-in `log_sink` (None default, same shape as `probe`); `lookahead_ms` now settable; `set_pc_map()` takes a plain dict, never the store — dispatcher thread still never touches SQLite.
+- **Logged position = boundary, not cursor** (cursor + lookahead). Deliberate: otherwise every log line reads off-by-the-lookahead vs the segment table.
+- **`ui/modes/output.py`** (replaces placeholders.py, deleted): preset table (PC + name editable, validated), per-row **test-send** (ISSUE-004 diagnostic — proves the chain with nothing playing), live log, active-preset indicator, offset spinbox + Apply/Revert.
+- `_dispatch_timer` (100ms) runs **only while Output is visible** (O1 precedent); entering Output drains immediately so buffered history shows at once.
+- **Latency knob LANDED**: hardcoded 75 → persisted `dispatch_offset_ms` (settings table), applied live to the running dispatcher, survives restart. Revert = one-step undo of the last Apply.
+- Live library.db migrated v8→v9 OK (9 tracks / 123 segments / 123 corrections / 1 playlist intact). Backup taken pre-migration.
+
+## Latency calibration — knob DONE 2026-08-03, MEASUREMENT still pending
 - Goal: PC lands on the *audible* tone boundary. Full reasoning: `docs/Report/latency-calibration-analysis.md`.
 - Model: `optimal_lookahead = L_chain + poll_wait − L_out`. Collapses to ONE global knob — boundaries are seconds apart, so no per-segment correction.
 - L_out (tracker lead, est 30-50ms) + hardcoded 75ms lookahead STACK → PCs likely fire **early**, not late. Correction direction is probably *less* lead. "On time by ear" is consistent with slightly-early.
 - L_chain (loopMIDI→host→plugin *audible* switch) is NOT measurable from Python. Supplied by ear for now; audio-loopback wizard is the later automation.
 - Built: `playback/latency_probe.py` (Samples/Summary/DispatchProbe); engine `last_tracker_lead_ms` from PortAudio DAC clock; dispatcher opt-in `probe` (poll jitter + send cost); `measure_latency.py` CLI. Probe is None in prod — dispatch path unchanged.
 - Callback writes a SINGLE float, no list/lock — deliberate, ISSUE-005 precedent. Sampler thread reads it at 50Hz.
-- NEXT: `python -m guitar_helper.measure_latency <track> --seconds 30` on real rig (loopMIDI + Nolly VST2/standalone), then replace hardcoded 75 with a persisted `dispatch_offset_ms`.
-- Side-win to weigh at the same time: `poll_interval_s` 50ms→15ms halves link-C jitter, negligible cost.
-- Calibrate button / confirm / revert UI (`Phase_4_QOL_changes.md`) deferred to the QOL pass — user's explicit call.
+- **NEXT (only remaining step): run `python -m guitar_helper.measure_latency <track> --seconds 30` on the real rig** (loopMIDI + Nolly VST2/standalone), then type the result into Output → Dispatch offset. No code change needed any more — O4 made it a persisted knob.
+- Side-win still unclaimed: `poll_interval_s` 50ms→15ms halves link-C jitter, negligible cost.
+- QOL calibrate *wizard* (confirm popup, auto-measure) still deferred; O4 shipped the manual knob + one-step Revert underneath it.
 
 ## ISSUE-004 (RESOLVED — 2026-07-15) — VST3 architecture limitation
 - **Root cause:** VST3 plugin format doesn't deliver raw MIDI PC to hosted plugins. Steinberg architecture requires host-side parameter mapping via IMidiMapping interface (not a defect in our dispatch code).
@@ -74,7 +79,8 @@ Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (committed). ISSUE-0
 - Post-O2 user feedback: "Play next" sidebar button works (reorder-after-current, Spotify semantics) but unclear + selection doesn't follow moved item — KEEP, clarity polish deferred to fancy-UI pass.
 
 ## MIDI preset mapping (presets table = source of truth; never hardcode)
-- clean=PC0, crunch=PC1, metal=PC2, edge=PC3, overdrive=PC4, other=-1 (no dispatch).
+- clean=PC0, edge=PC1, overdrive=PC2, crunch=PC3, metal=PC4, other=-1 (no dispatch).
+- CORRECTION (2026-08-03): this line previously read "clean=0, crunch=1, metal=2, edge=3, overdrive=4" — wrong. Verified against live library.db and `_DEFAULT_PRESETS`; the order above is the real clean→metal gain ramp and matches CLAUDE.md.
 - `ambient` deferred (re-add later as a custom preset on a free PC). `overdrive` = mid-gain between edge/crunch.
 
 ## Environment
@@ -96,7 +102,6 @@ Status: **Phase 1+2+3 DONE. Phase 4: M0+O1+O2 DONE, O3 DONE (committed). ISSUE-0
 - Batch analysis skips already-analyzed songs by hash; `--reanalyze` to force (now blocked on corrected tracks without `--discard-corrections`).
 
 ## Pending phases
-- **Latency:** run the measurement CLI, then land `dispatch_offset_ms` (see section above).
-- **Push/merge decision:** O3 ready for main; decide commit/push `phase4-o3-analysis` → main. Latency tooling is uncommitted on top.
-- **O4 Output:** preset panel (PC-only) + DispatchLogBuffer/log_sink + dispatch log panel (diagnostic for playback+MIDI).
-- **Later pool:** fancy-UI pass (incl. Play-next affordance), cover art/metadata via mutagen (iTunes/Bandcamp tags), lyrics+spectrum (spectrum re-adds pyqtgraph + re-enable viz_queue), queue persistence, more overdrive labels + recalibrate, Phase 5 PyInstaller.
+- **Latency:** run the measurement CLI on the rig; dial the number into Output (see section above). Only step left.
+- **QOL pass (next real workstream):** `docs/new feature specs/Phase_4_QOL_changes.md`. Biggest-value items by user note: min:sec + typed boundary entry with arrow-key nudge, modified-segment indicator before save, unmerge/split, multi-select, reload-on-save (edits currently need a song switch to take effect — `SegmentLookup` snapshots at construction), icon-based transport, right-click playlist add, preferences tab (count-in / click track), help tab.
+- **Later pool:** cover art/metadata via mutagen (iTunes/Bandcamp tags), lyrics+spectrum (spectrum re-adds pyqtgraph + re-enable viz_queue), queue persistence, more overdrive labels + recalibrate, Phase 5 PyInstaller.

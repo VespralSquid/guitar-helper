@@ -254,3 +254,22 @@ def test_migration_upgrades_to_current(start_version):
         assert rows == 1  # existing data preserved
     finally:
         os.unlink(path)
+
+
+def test_fresh_db_has_settings_table(db):
+    assert "settings" in _table_names(db)
+
+
+def test_migration_creates_settings_table():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    conn = None
+    try:
+        _make_v3_db(path)
+        conn = init_db(path)
+        assert "settings" in _table_names(conn)
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == _CURRENT_VERSION
+    finally:
+        if conn is not None:
+            conn.close()
+        os.unlink(path)

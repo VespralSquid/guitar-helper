@@ -26,7 +26,7 @@ from guitar_helper.ui.editor.validation import EditResult
 from guitar_helper.ui.load_worker import LoadWorker
 from guitar_helper.ui.modes.analysis import AnalysisMode
 from guitar_helper.ui.modes.home import HomeMode
-from guitar_helper.ui.modes.placeholders import OutputMode
+from guitar_helper.ui.modes.output import OutputMode
 from guitar_helper.ui.panels.queue_sidebar import QueueSidebar
 from guitar_helper.ui.state.editor_state import EditorState
 from guitar_helper.ui.state.queue_state import QueueState
@@ -34,6 +34,7 @@ from guitar_helper.ui.state.state_bridge import EditorStateBridge, QueueStateBri
 from guitar_helper.ui.transport import TransportControls
 
 _POS_TIMER_MS = 50
+_DISPATCH_TIMER_MS = 100
 _TRACK_END_EPSILON_MS = 50
 _MODE_NAMES = ("Home", "Analysis", "Output")
 MODE_HOME, MODE_ANALYSIS, MODE_OUTPUT = range(3)
@@ -57,7 +58,8 @@ class MainWindow(QMainWindow):
 
         self.home = HomeMode(application.store)
         self.analysis = AnalysisMode(tone_labels)
-        self.output = OutputMode()
+        self.output = OutputMode(application.store)
+        self.output.set_dispatch_offset_ms(application.dispatch_offset_ms)
         self.transport = TransportControls()
         self.queue_sidebar = QueueSidebar(self._queue, self._queue_bridge)
         self.queue_sidebar.setFixedWidth(theme.QUEUE_SIDEBAR_WIDTH)
@@ -92,6 +94,12 @@ class MainWindow(QMainWindow):
         self._pos_timer = QTimer(self)
         self._pos_timer.setInterval(_POS_TIMER_MS)
         self._pos_timer.timeout.connect(self._on_pos_tick)
+        # Runs only while Output is the visible mode — same reasoning as the
+        # playhead repaint skip in O1: no work for a view nobody is looking at.
+        # The log itself is a bounded deque, so nothing is lost while it sleeps.
+        self._dispatch_timer = QTimer(self)
+        self._dispatch_timer.setInterval(_DISPATCH_TIMER_MS)
+        self._dispatch_timer.timeout.connect(self._on_dispatch_tick)
 
         self._build_menu()
         self._wire_signals()
@@ -120,6 +128,10 @@ class MainWindow(QMainWindow):
 
         self.home.playRequested.connect(self._on_play_requested)
         self.home.analyzeRequested.connect(self._on_analyze_requested)
+        self.output.presetsChanged.connect(self._app.reload_presets)
+        self.output.testSendRequested.connect(self._on_test_send)
+        self.output.dispatchOffsetChanged.connect(self._app.set_dispatch_offset_ms)
+        self.output.statusMessage.connect(lambda text: self.statusBar().showMessage(text, 4000))
         self.queue_sidebar.playAtRequested.connect(self._on_queue_play_at)
         self.analysis.seekRequested.connect(self._on_timeline_clicked)
         self.analysis.rowSelected.connect(self._state.select)
@@ -332,6 +344,19 @@ class MainWindow(QMainWindow):
     def _on_mode_changed(self, row: int) -> None:
         if row == MODE_ANALYSIS:
             self._last_pos_ms = None  # force a playhead refresh on the next tick
+        if row == MODE_OUTPUT:
+            self.output.refresh_presets()
+            self._on_dispatch_tick()  # show what the buffer holds, don't wait 100ms
+            self._dispatch_timer.start()
+        else:
+            self._dispatch_timer.stop()
+
+    def _on_dispatch_tick(self) -> None:
+        self.output.append_events(self._app.dispatch_log.drain())
+        self.output.set_active_preset(self._app.dispatch_log.last_send)
+
+    def _on_test_send(self, pc_number: int) -> None:
+        self._app.port.send_program_change(self._app.channel, pc_number)
 
     def _on_state_loaded(self) -> None:
         self.analysis.set_segments(self._state.segments)
@@ -411,5 +436,6 @@ class MainWindow(QMainWindow):
             self._load_worker.wait()
             self._load_worker = None
         self._pos_timer.stop()
+        self._dispatch_timer.stop()
         self._app.shutdown()
         super().closeEvent(event)

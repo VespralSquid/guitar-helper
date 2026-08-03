@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .interfaces import IPlaylistStore, ISegmentStore, Playlist, Preset, Segment, Track
+from .interfaces import IAppStore, IPlaylistStore, Playlist, Preset, Segment, Track
 from .schema import utcnow
 
 _TRACK_SELECT = """
@@ -15,7 +15,7 @@ _TRACK_SELECT = """
 """
 
 
-class SQLiteSegmentStore(ISegmentStore, IPlaylistStore):
+class SQLiteSegmentStore(IAppStore, IPlaylistStore):
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -261,6 +261,35 @@ class SQLiteSegmentStore(ISegmentStore, IPlaylistStore):
             (playlist_id,),
         ).fetchall()
         return [_row_to_track(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO settings(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        self._conn.commit()
+
+    def get_int_setting(self, key: str, default: int) -> int:
+        raw = self.get_setting(key)
+        if raw is None:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
 
 
 # ------------------------------------------------------------------

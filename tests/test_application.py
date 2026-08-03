@@ -5,7 +5,9 @@ import pytest
 from guitar_helper.analysis.audio_loader import AudioLoader
 from guitar_helper.application import Application, NoSegmentsError
 from guitar_helper.config import AppConfig
+from guitar_helper.db.interfaces import Preset
 from guitar_helper.midi.mock_port import MockMidiPort
+from guitar_helper.playback.midi_dispatcher import DEFAULT_LOOKAHEAD_MS
 from tests.conftest import make_segment
 
 
@@ -109,3 +111,85 @@ def test_shutdown_closes_port(app):
     application.load(wav)
     application.shutdown()
     assert application.port.closed
+
+
+# ----------------------------------------------------------------------
+# O4: persisted dispatch offset, live preset refresh, dispatch log
+# ----------------------------------------------------------------------
+
+def test_dispatch_offset_defaults_to_dispatcher_default(app):
+    application, _, _ = app
+    assert application.dispatch_offset_ms == DEFAULT_LOOKAHEAD_MS
+
+
+def test_dispatch_offset_persists_across_application_instances(app, tmp_path):
+    """Calibration is a property of the rig, not the session — a restart must
+    not silently return to the default."""
+    application, _, _ = app
+    application.set_dispatch_offset_ms(18)
+
+    restarted = Application(
+        AppConfig.resolve(tmp_path), store=application.store, port=MockMidiPort()
+    )
+    assert restarted.dispatch_offset_ms == 18
+
+
+def test_attached_dispatcher_uses_persisted_offset(app):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "metal")])
+    application.set_dispatch_offset_ms(25)
+
+    application.load(wav)
+    assert application.dispatcher.lookahead_ms == 25
+
+
+def test_set_offset_applies_to_running_dispatcher(app):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "metal")])
+    application.load(wav)
+
+    application.set_dispatch_offset_ms(-30)
+    assert application.dispatcher.lookahead_ms == -30
+
+
+def test_reload_presets_updates_live_dispatcher(app):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "metal")])
+    application.load(wav)
+    application.store.save_preset(Preset("metal", "Metal", 9))
+
+    application.reload_presets()
+    application.tracker.set_cursor(0)
+    application.dispatcher.tick()
+
+    assert application.port.sent == [(0, 9)]
+
+
+def test_reload_presets_is_safe_before_a_track_is_loaded(app):
+    application, _, _ = app
+    application.reload_presets()  # must not raise
+
+
+def test_dispatch_log_collects_events_from_the_wired_dispatcher(app):
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "metal")])
+    application.load(wav)
+    application.tracker.set_cursor(0)
+    application.dispatcher.tick()
+
+    events = application.dispatch_log.drain()
+    assert [(e.kind, e.tone, e.pc) for e in events] == [("send", "metal", 4)]
+
+
+def test_dispatch_log_survives_a_track_change(app, make_wav):
+    """The Output panel keeps its history across loads — the log outlives the
+    per-track dispatcher."""
+    application, wav, file_hash = app
+    application.store.save_segments(file_hash, [make_segment(file_hash, 0, 2000, "metal")])
+    application.load(wav)
+    application.tracker.set_cursor(0)
+    application.dispatcher.tick()
+
+    application.load(wav)  # rebuilds the runtime graph
+    assert application.dispatch_log.last_send is not None
+    assert len(application.dispatch_log.drain()) == 1
