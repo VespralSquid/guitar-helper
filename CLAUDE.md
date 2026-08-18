@@ -1,13 +1,14 @@
 # Guitar Performance Assistant — Project Brief
 
 ## What this project is
-Fully offline Python desktop app: analyses locally-stored audio files (librosa) → stores segment/tone data (SQLite) → plays audio (sounddevice) → fires MIDI Program Change messages at tone boundaries → displays PySide6 UI with waveform, spectrum, lyrics, and segment overlay.
+Fully offline Python desktop app: analyses locally-stored audio files (librosa) → stores segment/tone data (SQLite) → plays audio (sounddevice) → fires MIDI Program Change messages at tone boundaries → displays a PySide6 UI with a segment timeline, segment editor, and MIDI dispatch log.
 
 Three tiers: Analysis (offline batch) → Playback + MIDI (runtime) → Presentation (PySide6 UI).
 
 ## Current status
-- Phase 1 complete: DB layer, AudioLoader, CI/CD on GitHub (`VespralSquid/guitar-helper`, private)
-- Phase 2 in progress: analysis pipeline (feature_extractor, segmenter, tone_classifier, pipeline, correction CLI)
+- Phases 1–3 complete: DB layer, analysis pipeline, stem separation, calibration, playback engine, MIDI dispatch, CI/CD on GitHub (`VespralSquid/guitar-helper`, private)
+- Phase 4 milestones M0–M3 + O1–O4 complete. Remaining Phase 4 work is the QOL pass (`docs/new feature specs/Phase_4_QOL_changes.md`)
+- Pre-MVP: see `docs/Report/mvp-readiness-review.md` for open release blockers, and `docs/architecture/ARCHITECTURE.md` for the as-built map
 
 ## Multi-Agent Routing
 
@@ -43,6 +44,8 @@ When delegating work, use the `Agent` tool with the `model` parameter:
 | other | -1 (no dispatch) |
 
 PC order is a deliberate clean->metal gain progression (reordered from the original clean/crunch/metal/edge/overdrive layout to smooth the ramp). `ambient` is deferred — removed from presets/classifier (schema v4). Re-add ambient later as a custom preset on a free PC.
+
+**KNOWN DEFECT (ISSUE-006, OPEN) — this table describes a *freshly created* database only.** `_seed()` runs only when `schema_version` is absent, and three of the five historical changes to `_DEFAULT_PRESETS` shipped without a migration. A database created before the gain-ramp reorder keeps `clean=0, crunch=1, metal=2, edge=3, overdrive=4`; one created before Phase 2 has no `edge` row at all, which makes `edge` segments unstorable (FK violation). Verify against the live DB before trusting either layout. Full analysis, repro and fix options: `docs/debug/ISSUE-006-preset-map-migration-divergence.md`.
 
 ## Debug Documentation
 
@@ -92,11 +95,30 @@ guitar_helper/
     pipeline.py     — AnalysisPipeline.run() orchestrator
   correction/
     cli.py          — SegmentCorrectionTool (interactive label + boundary editing)
-  playback/         — AudioBuffer, PlaybackEngine, PositionTracker, SegmentLookup, MidiDispatcher
+  playback/
+    audio_buffer.py — decoded float32 (frames, channels) in RAM
+    playback_engine.py   — sounddevice stream; non-blocking callback
+    position_tracker.py  — lock-guarded frame cursor -> ms
+    segment_lookup.py    — bisect over a construction-time snapshot
+    midi_dispatcher.py   — own thread; on-change-only PC dispatch
+    dispatch_log.py      — bounded thread-safe decision log (send/hold/unmapped/gap)
+    latency_probe.py     — opt-in instrumentation; None in production
   midi/             — IMidiPort, MidoPort, MockMidiPort
-  ui/               — MainWindow, TransportControls, VisualizationBridge, views
-  lyrics/           — LrcParser, LrcLibClient
+  ui/
+    app.py, main_window.py — composition of the Qt shell
+    modes/          — home.py (playlists), analysis.py (editor), output.py (MIDI)
+    state/          — editor_state.py, queue_state.py (Qt-FREE), state_bridge.py
+    editor/         — validation.py, merge.py, preset_validation.py (Qt-FREE)
+    views/          — segment_timeline.py (replaced the pyqtgraph waveform)
+    panels/         — queue_sidebar.py
+    models/         — qt_adapters.py (QAbstractTableModel adapters)
+    theme.py, transport.py, controllers.py, load_worker.py
+  application.py    — composition root; per-track lifecycle (decode/attach)
+  config.py         — one root -> db/library/stems/archetypes paths
+  lyrics/           — EMPTY PACKAGE. LrcParser/LrcLibClient not implemented (deferred)
 ```
+
+Full as-built map, design decisions and threading model: `docs/architecture/ARCHITECTURE.md`.
 
 ## Environment
 - Python 3.14.3, Windows 11

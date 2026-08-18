@@ -4,7 +4,7 @@ _Written 2026-07-10. Describes the Phase 4 UI as implemented through milestone M
 (`guitar_helper/ui/`, `guitar_helper/playback/`, `guitar_helper/application.py`).
 This is a reference for what the code actually does, not a design proposal — for
 the original intent/rationale see `docs/phase4-ui-plan.md`. For fix proposals for
-the bugs referenced in section 6, see `docs/debug/List of known errors`._
+the bugs referenced in section 6, see `docs/debug/user-reported-errors-phase4.md`._
 
 ---
 
@@ -190,7 +190,7 @@ and playing — see §6.
 ## 6. Known architectural gaps (as-built facts, not yet fixed)
 
 These are the code-level causes behind the bugs logged in
-`docs/debug/List of known errors`. Documented here for reference; **no fix has
+`docs/debug/user-reported-errors-phase4.md`. Documented here for reference; **no fix has
 been applied for either** — that's a follow-up decision pending review of this
 document.
 

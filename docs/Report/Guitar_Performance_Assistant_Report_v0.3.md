@@ -1,3 +1,18 @@
+> ## ⚠️ SUPERSEDED by v0.4 (`Guitar_Performance_Assistant_Report_v0.4.md`, 2026-08-04)
+>
+> This document is **design intent from before Tiers 2 and 3 were built**, and is
+> retained unedited as a historical record. Substantial parts of it no longer
+> describe the system: the tone taxonomy, the database schema, the Tier 3
+> component list, and the SOLID examples in §8 all changed during implementation.
+> Notably, `IRenderer`, `SpectrumAnalyzer`, `WaveformView`, `SegmentOverlay`,
+> `LyricsParser`, `LyricsDisplay`, `IPlaybackPositionProvider` and
+> `IAudioChunkProvider` were **never built**, and `segments.preset_name` does not
+> exist.
+>
+> **Read v0.4 for the as-built architecture.** Read this only for the June design
+> reasoning and the Spotify-removal history, which v0.4 summarises rather than
+> repeats.
+
 # Guitar Performance Assistant
 ## Project Design Report — Version 0.3
 ### Full Offline Architecture & Three-Tier Design
@@ -5,7 +20,8 @@
 **Version:** 0.3 — Full Offline Redesign  
 **Date:** 2026-06-11  
 **Author:** Aryan  
-**Supersedes:** v0.2 (Guitar_Performance_Assistant_Report_v0.2.md)
+**Supersedes:** v0.2 (Guitar_Performance_Assistant_Report_v0.2.md)  
+**Superseded by:** v0.4 (2026-08-04)
 
 ---
 

@@ -11,7 +11,7 @@ _Status: APPROVED 2026-07-13. Supersedes the milestone roadmap of `phase4-ui-pla
 The overhaul spec attributes load lag and playback persistence to "lack of separation
 between playback and librosa analysis." Analysis already runs offline (Phase 2 batch
 pipeline); librosa at runtime only **decodes** audio. The three errors in
-`docs/debug/List of known errors` traced to two lifecycle/threading gaps
+`docs/debug/user-reported-errors-phase4.md` traced to two lifecycle/threading gaps
 (`docs/Report/phase4-ui-architecture.md` §6), both fixed in **M0** (2026-07-13):
 
 - **Gap A — no teardown on reload.** `Application.load()` rebuilt the runtime graph

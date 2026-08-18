@@ -4,7 +4,7 @@ _Written 2026-07-14, covering commit `4bdf312` ("Phase 4 M0+O1+O2: lifecycle fix
 
 **What this document is.** A record of what the Phase 4 rework changed and *why* — the reasoning behind each change, not a file-by-file inventory. It supersedes `phase4-ui-architecture.md` as a description of current behaviour; that document is retained unedited as a snapshot of the pre-rework design (M1–M3) and of the diagnosis that led here. Where the two disagree, this one is current.
 
-**Why the rework happened.** Three user-reported bugs (`docs/debug/List of known errors`) turned out to be symptoms of two structural problems in the M1–M3 UI: no teardown of per-track playback objects on reload, and a main thread doing far too much work. Fixing them properly meant restructuring the shell, so the fixes were bundled with the Home/Analysis/Output overhaul (`docs/plans/phase4-overhaul-plan.md`).
+**Why the rework happened.** Three user-reported bugs (`docs/debug/user-reported-errors-phase4.md`) turned out to be symptoms of two structural problems in the M1–M3 UI: no teardown of per-track playback objects on reload, and a main thread doing far too much work. Fixing them properly meant restructuring the shell, so the fixes were bundled with the Home/Analysis/Output overhaul (`docs/plans/phase4-overhaul-plan.md`).
 
 ---
 
