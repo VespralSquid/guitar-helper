@@ -1,6 +1,6 @@
 # ISSUE-007 — The GUI cannot add or analyse songs
 
-**Status:** OPEN (confirmed; no fix applied). **Blocks MVP release.**
+**Status:** OPEN (partially addressed). **Blocks MVP release.**
 **Date:** 2026-08-04
 **Component:** `guitar_helper/ui/` (no owner — the capability does not exist), `guitar_helper/analysis/pipeline.py`
 **Found by:** MVP readiness follow-up question — "does the product ship with the database, or is it created as the user adds songs?"
@@ -177,8 +177,9 @@ the computation on a worker, and do the store access on the main thread.
 
 ## Current status
 
-Confirmed; no fix applied. Implementation plan:
-`docs/plans/gui-analysis-pipeline-plan.md`.
+**Groundwork landed in commit `922bf00` (Gate 3 Wave 1).** The Qt-free tier split is in place: `analyse()` returns pure `AnalysisResult`, `persist()` handles store writes on the main thread, `run()` wraps both and maintains CLI compatibility. `AnalysisPipeline` now requires `separator` as a keyword-only argument (the invariant enforced); `--no-separate` removed; `NullSeparator` documented as test-only. `analysis/environment.py` added for preflight (stack importability, weights, ffmpeg, paths).
+
+**GUI analysis pipeline still absent.** The "Analyze" button misnames and does not add new songs. No `AnalysisWorker`, progress dialog, or Home wiring. The `delete_track` capability does not exist, so users cannot remove songs. Removing-and-re-adding requires that deletion work first. This is Wave 2 of the Gate 3 implementation and is the remaining blocker for release.
 
 ## Lessons
 

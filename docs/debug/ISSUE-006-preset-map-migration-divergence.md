@@ -1,6 +1,6 @@
 # ISSUE-006 — Preset map diverges between fresh and migrated databases
 
-**Status:** OPEN (diagnosed, reproduced by simulation; no fix applied). **Blocks MVP release.**
+**Status:** RESOLVED (2026-08-18). Fixed in commit `afa150d`.
 **Date:** 2026-08-04
 **Component:** `guitar_helper/db/schema.py` — `_seed()`, `_MIGRATIONS`, `_DEFAULT_PRESETS`
 **Found by:** MVP readiness review (`docs/Report/mvp-readiness-review.md` §B2)
@@ -356,13 +356,11 @@ about `presets`. Minimum coverage to add:
 
 ## Current status
 
-Diagnosed and reproduced; **no fix applied**. Decision pending between A, B and
-C — see the recommendation above. The UNIQUE index and the five tests are agreed
-regardless of which option is chosen.
+**Option A implemented** — `presets.user_modified` column added to schema v10, migrations reconcile non-user-modified rows against `_DEFAULT_PRESETS`, partial UNIQUE index on `pc_number >= 0` created. Output mode displays a divergence banner when the live database does not match `_DEFAULT_PRESETS`, with a one-click reset for users who did not intentionally customise their presets.
 
-The live `library.db` currently reads the correct fresh ordering, so this is not
-blocking local work. It blocks **release**, because every existing early-adopter
-database is in one of the two broken populations.
+Five migration tests added: (1) convergence — migrated presets equal fresh presets for all legacy start versions; (2) `edge` storability after a pre-Phase-2 migration; (3) no duplicate `pc_number` after migrating a v1 database with an `ambient` segment; (4) user-modified rows with non-default PCs survive untouched; (5) the `0922b7c` reorder completes without an `IntegrityError`.
+
+Live `library.db` migrated v9→v10: 9 tracks, 123 segments, 123 manual corrections intact, no duplicate `pc_number`, unique index present.
 
 ---
 

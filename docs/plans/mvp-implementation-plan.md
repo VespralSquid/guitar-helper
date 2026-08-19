@@ -26,9 +26,9 @@ and is not repeated here:
 
 | Gate | Objective | Status |
 |---|---|---|
-| **1** | Data integrity — writes are atomic, preset map is sound | Not started |
-| **2** | Separation invariant, stem-cache correctness, track deletion | Not started |
-| **3** | GUI can add and analyse songs | Not started |
+| **1** | Data integrity — writes are atomic, preset map is sound | Done (commits `afa150d`, B1 in same) |
+| **2** | Separation invariant, stem-cache correctness, track deletion | Partially done (4.2 stem cache done in `eb05ffd`; 4.1 invariant done in `922bf00`; 4.3 `delete_track` outstanding) |
+| **3** | GUI can add and analyse songs | Partially done (Qt-free split done in `922bf00`; UI and dialogs outstanding) |
 | **4** | Robustness — no dead ends, no escaped exceptions | Not started |
 | **5** | Packaging — a real installable build | Not started |
 | **6** | Documentation — user-facing | 3 of 5 done |
@@ -323,9 +323,9 @@ is a hypothesis, not a cause.
 
 ## 9. Open decisions
 
-| # | Decision | Blocks | Recommendation |
+| # | Decision | Blocks | Status |
 |---|---|---|---|
-| **D1** | ISSUE-006 reconcile: **A** (`user_modified` + banner) / **B** (legacy fingerprint) / **C** (detect-only) | **Gate 1 — needed first** | **A** — retires the bug class rather than this instance |
+| **D1** | ISSUE-006 reconcile: **A** (`user_modified` + banner) / **B** (legacy fingerprint) / **C** (detect-only) | **Gate 1** | **RESOLVED: option A** (commit `afa150d`) |
 | D2 | Bundle ffmpeg, or detect and link | Gate 5 | Bundle if licensing permits; `.m4a` is the primary format |
 | D3 | Pause playback during analysis | Gate 3 step 8 | Decide from the listening test, not speculation |
 | D4 | GUI re-analysis of corrected tracks | Gate 3 | No, for MVP — the CLI flag stays the deliberate escape hatch |

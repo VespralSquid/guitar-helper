@@ -1,6 +1,6 @@
 # ISSUE-008 — An incomplete or invalid cached stem is permanently accepted as valid
 
-**Status:** OPEN (diagnosed, reproduced; no fix applied). Blocks GUI analysis (ISSUE-007).
+**Status:** RESOLVED (2026-08-18). Fixed in commit `eb05ffd`.
 **Date:** 2026-08-04
 **Component:** `guitar_helper/analysis/source_separator.py` — `AudioSeparator.separate_guitar`
 **Related:** ISSUE-007 §3 (cancellation), `docs/plans/gui-analysis-pipeline-plan.md` §2.3, §0.2
@@ -266,6 +266,10 @@ true here but is an assumption, not a check.
 
 ## Test plan
 
+All nine were implemented and pass; `tests/test_source_separator.py` carries 32 tests in
+total, the remainder covering digest determinism, small-file digests, unparseable manifests,
+the frozen `separate_guitar` signature and the `NullSeparator` docstring.
+
 1. Truncated stem is rejected as a miss and re-separated (not returned as a hit).
 2. Zero-filled same-size stem is rejected (requires S2's `stem_bytes`, or S4).
 3. Missing manifest → miss, even when the wav looks perfect.
@@ -278,6 +282,20 @@ true here but is an assumption, not a check.
    once and gains a manifest.
 9. Two concurrent separations of the same hash both complete and the cache ends
    valid.
+
+Test 2 is the one that changed the design — see below. A tenth test was added at the
+integration gate: a locked or unreadable cached wav is a cache miss rather than a raw
+`OSError` escaping `separate_guitar`.
+
+---
+
+## Current status
+
+**All three layers implemented:** S1 atomic publish via `os.replace` from per-run temp directories; S2 completion manifest written after the WAV, carrying cache format version, source hash, model identity; S3 validation on hit requiring manifest presence, version match, hash match, and byte-size check.
+
+Sampled digest (originally optional as a check for Class B corruption) was promoted to mandatory in the implementation. Measurement showed the byte-size check alone cannot catch zero-fill — a correct-length, zero-filled stem passes duration validation and makes every segment `other` (disabling MIDI dispatch), so the complete proof of valid contents became essential rather than optional.
+
+Nine existing stems without manifests were grandfathered: validated against `tracks.duration_ms`, marked `"grandfathered": true` in synthesised manifests. Temp directories swept at startup; `SeparationError` raised where failed separation previously returned a nonexistent path.
 
 ---
 

@@ -1,7 +1,7 @@
 # Save State — Guitar Helper
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-18_
 
-Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul-plan.md` roadmap is complete. 370 tests passing, committed tree ruff-clean. Work has shifted from features to **MVP release readiness**.
+Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul-plan.md` roadmap is complete. 459 tests passing, committed tree ruff-clean. Work has shifted from features to **MVP release readiness**. Gates 1–2 partially done; Gate 3 groundwork done.
 
 ## READ FIRST
 - **`docs/plans/mvp-implementation-plan.md`** — master execution plan: 6 gates, ordering rationale, how each is accomplished. Everything below is context for it.
@@ -9,12 +9,14 @@ Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul
 - `docs/Report/Guitar_Performance_Assistant_Report_v0.4.md` — as-built architecture. **v0.3 is superseded** and describes components never built (IRenderer/SpectrumAnalyzer/LyricsParser).
 - `docs/architecture/ARCHITECTURE.md` — component map, 17 numbered design decisions (D1-D17), threading contract.
 
-## MVP blockers (2026-08-04 review)
-- **B1 — `save_segments` is not transactional.** DELETE + executemany + commit; a mid-write failure leaves the delete + partial insert in an OPEN transaction, committed by the next unrelated write. REPRODUCED destroying a `manually_corrected` segment. Same class as the June wipe; the `ManualCorrectionsExistError` guard does NOT cover it. `EditorState.save()` has the same shape.
-- **ISSUE-006** — migrations never converge on `_DEFAULT_PRESETS` (`_seed()` runs only when `schema_version` is absent; 3 of 5 preset changes shipped with no migration). A v6-era DB keeps clean0/crunch1/metal2/edge3/overdrive4 = wrong PC for every tone but clean, silent, audible only by ear. A v1-era DB has NO `edge` row -> FK violation -> triggers B1. No UNIQUE on `pc_number`.
-- **ISSUE-007** — the GUI cannot add or analyse songs. `grep AnalysisPipeline guitar_helper/ui/` = zero matches. A packaged .exe opens to an empty library and tells the user to run a Python module. The Home "Analyze" button is misnamed (it opens ALREADY-analysed tracks for correction).
-- **ISSUE-008** — stem-cache validity is `cached.exists()` only. A stem truncated to 33% returns as a valid hit and loads as 87.9s of a 264s track. 13 failure cases in 4 classes. A zero-filled same-size stem PASSES a duration check and makes every segment `other` = NO MIDI dispatch at all.
-- **Packaging: nothing exists.** No pyproject/README/LICENSE/PyInstaller spec. `ui/state/` is an implicit namespace package (PyInstaller misses these). db/stems/archetypes resolve to CWD.
+## MVP blockers (remaining)
+- **ISSUE-007** — GUI cannot add or analyse songs; **no ingestion path exists.** Qt-free tier split done (`922bf00`); the `AnalysisWorker`, progress dialog, Home wiring, and `delete_track` capability still outstanding. Resolved in Gate 3 Wave 2.
+- **Packaging: nothing exists.** No pyproject/README/LICENSE/PyInstaller spec. `ui/state/` is an implicit namespace package (PyInstaller misses these). db/stems/archetypes resolve to CWD. Gate 5.
+
+## Resolved (ISSUE-006/008, B1, schema v10)
+- **B1 — `save_segments` not transactional.** RESOLVED (`afa150d`): wrapped in a single transaction; `EditorState.save()` uses new atomic `apply_edits()` method.
+- **ISSUE-006** — preset-map divergence. RESOLVED (`afa150d`): option A implemented — `presets.user_modified` column, v10 migration reconciles non-user-modified rows, partial UNIQUE index, Output-mode divergence banner. All traps honoured; five migration tests added; live DB migrated intact.
+- **ISSUE-008** — stem-cache poisoning. RESOLVED (`eb05ffd`): atomic publish + completion manifest + validation on hit; sampled digest promoted to mandatory (zero-fill cannot be caught by byte-size alone). Nine existing stems grandfathered.
 
 ## Product decisions (2026-08-04)
 - **No songs and no database ship.** Library entirely user-supplied. Only `archetypes.json` ships.
@@ -38,7 +40,7 @@ Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul
 - `archetypes.json`: clean, edge, overdrive, crunch, metal (mean-based). `ambient` removed.
 - EXP-001 LOOCV macro-F1 ~0.69 (was 0.434). Per-tone F1: metal .89, crunch .82, overdrive .71, other .69, clean .56, edge .48.
 - `overdrive` has only 5 labelled segments — least robust; label more + re-run `run_calibrate`.
-- Live `library.db`: **9 tracks, 123 segments, 123 corrections, 1 playlist, schema v9.**
+- Live `library.db`: **9 tracks, 123 segments, 123 corrections, 1 playlist, schema v10.** All rows migrated; no duplicates; unique index on `pc_number >= 0`.
 - Calibration statistic = **mean** (EXP-001: clean-data LOOCV prefers mean .693 vs median .660). Median is the fallback if outlier contamination returns.
 
 ## MIDI preset mapping (presets table = source of truth; never hardcode)

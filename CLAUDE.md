@@ -8,7 +8,7 @@ Three tiers: Analysis (offline batch) → Playback + MIDI (runtime) → Presenta
 ## Current status
 - Phases 1–3 complete: DB layer, analysis pipeline, stem separation, calibration, playback engine, MIDI dispatch, CI/CD on GitHub (`VespralSquid/guitar-helper`, private)
 - Phase 4 milestones M0–M3 + O1–O4 complete. Remaining Phase 4 work is the QOL pass (`docs/new feature specs/Phase_4_QOL_changes.md`)
-- Pre-MVP: see `docs/Report/mvp-readiness-review.md` for open release blockers, and `docs/architecture/ARCHITECTURE.md` for the as-built map
+- **MVP Wave 1 (2026-08-18) complete:** Gates 1–2 partially done. ISSUE-006 (preset reconciliation), ISSUE-008 (stem-cache validation), and B1 (atomic writes) resolved. Schema v10. 459 tests passing. ISSUE-007 groundwork done (Qt-free tier split); GUI analysis and `delete_track` outstanding in Gate 3 Wave 2.
 
 ## Multi-Agent Routing
 
@@ -45,7 +45,7 @@ When delegating work, use the `Agent` tool with the `model` parameter:
 
 PC order is a deliberate clean->metal gain progression (reordered from the original clean/crunch/metal/edge/overdrive layout to smooth the ramp). `ambient` is deferred — removed from presets/classifier (schema v4). Re-add ambient later as a custom preset on a free PC.
 
-**KNOWN DEFECT (ISSUE-006, OPEN) — this table describes a *freshly created* database only.** `_seed()` runs only when `schema_version` is absent, and three of the five historical changes to `_DEFAULT_PRESETS` shipped without a migration. A database created before the gain-ramp reorder keeps `clean=0, crunch=1, metal=2, edge=3, overdrive=4`; one created before Phase 2 has no `edge` row at all, which makes `edge` segments unstorable (FK violation). Verify against the live DB before trusting either layout. Full analysis, repro and fix options: `docs/debug/ISSUE-006-preset-map-migration-divergence.md`.
+As of schema v10, this table describes both fresh and migrated databases. The `_migrate_v9_to_v10` migration reconciles non-user-modified rows against `_DEFAULT_PRESETS`, adds the missing `edge` row for old databases, and enforces a partial UNIQUE index on `pc_number >= 0`. Rows with `user_modified = 1` (set by the Output panel) are preserved unchanged. See `docs/debug/ISSUE-006-preset-map-migration-divergence.md` for the full reconciliation story.
 
 ## Debug Documentation
 
@@ -77,7 +77,7 @@ Before context compaction, update `SAVE_STATE.md`. Use `/quick-docs` to delegate
 - Phase completion status
 - Active bugs / ISSUE-NNN blockers
 - Decisions made verbally that aren't in the report or code
-- Environment facts (ffmpeg absent, ruff target-version quirk, etc.)
+- Environment facts (ruff target-version quirk, rtmidi source build, etc.)
 - What was wrong in a previous save state that has since been corrected
 
 ## Key File Map
@@ -123,7 +123,7 @@ Full as-built map, design decisions and threading model: `docs/architecture/ARCH
 ## Environment
 - Python 3.14.3, Windows 11
 - venv at `.venv/`; activate before running anything
-- ffmpeg NOT installed — WAV/FLAC/OGG work; MP3/AAC blocked until ffmpeg is added
+- ffmpeg 8.0.1 installed — WAV/FLAC/OGG/MP3/AAC all supported
 - ruff linting: `python -m ruff check guitar_helper/`
 - CI: GitHub Actions on `windows-latest`, runs ruff + pytest on push to main
 - Do not mention the use of claude and advertising phrases such as "co-authored by Claude" and similar.
