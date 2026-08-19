@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import soundfile as sf
 
+from guitar_helper.analysis.environment import SUPPORTED_SUFFIXES
 from guitar_helper.db.interfaces import Segment
 from guitar_helper.run_batch import _AUDIO_EXTENSIONS, _discover_audio, _read_tags, _tone_summary
 
@@ -124,17 +127,18 @@ def test_batch_skips_already_analyzed(tmp_path, capsys):
         patch("guitar_helper.run_batch.AudioLoader") as MockLoader,
         patch("guitar_helper.run_batch.SQLiteSegmentStore", return_value=mock_store),
         patch("guitar_helper.run_batch.init_db"),
-        patch("guitar_helper.run_batch.AnalysisPipeline", return_value=mock_pipeline),
-        patch("guitar_helper.run_batch.NullSeparator"),
+        patch("guitar_helper.run_batch.AnalysisPipeline", return_value=mock_pipeline) as MockPipeline,
+        patch("guitar_helper.run_batch.AudioSeparator") as MockSeparator,
     ):
         MockLoader.return_value.load.return_value = (5000, "fakehash")
-        import sys
+        separator_instance = MockSeparator.return_value
 
         from guitar_helper.run_batch import main
-        sys.argv = ["run_batch", str(tmp_path), "--no-separate"]
+        sys.argv = ["run_batch", str(tmp_path)]
         main()
 
     mock_pipeline.run.assert_not_called()
+    assert MockPipeline.call_args.kwargs["separator"] is separator_instance
     captured = capsys.readouterr()
     assert "SKIP" in captured.out
 
@@ -153,13 +157,12 @@ def test_batch_reanalyze_flag_bypasses_skip(tmp_path, capsys):
         patch("guitar_helper.run_batch.SQLiteSegmentStore", return_value=mock_store),
         patch("guitar_helper.run_batch.init_db"),
         patch("guitar_helper.run_batch.AnalysisPipeline", return_value=mock_pipeline),
-        patch("guitar_helper.run_batch.NullSeparator"),
+        patch("guitar_helper.run_batch.AudioSeparator"),
     ):
         MockLoader.return_value.load.return_value = (5000, "fakehash")
-        import sys
 
         from guitar_helper.run_batch import main
-        sys.argv = ["run_batch", str(tmp_path), "--no-separate", "--reanalyze"]
+        sys.argv = ["run_batch", str(tmp_path), "--reanalyze"]
         main()
 
     mock_pipeline.run.assert_called_once()
@@ -193,16 +196,30 @@ def test_batch_continues_after_failure(tmp_path, capsys):
         patch("guitar_helper.run_batch.SQLiteSegmentStore", return_value=mock_store),
         patch("guitar_helper.run_batch.init_db"),
         patch("guitar_helper.run_batch.AnalysisPipeline", return_value=mock_pipeline),
-        patch("guitar_helper.run_batch.NullSeparator"),
+        patch("guitar_helper.run_batch.AudioSeparator"),
     ):
         MockLoader.return_value.load.return_value = (5000, "h")
-        import sys
 
         from guitar_helper.run_batch import main
-        sys.argv = ["run_batch", str(tmp_path), "--no-separate"]
+        sys.argv = ["run_batch", str(tmp_path)]
         main()
 
     assert call_count == 2  # attempted both files
     captured = capsys.readouterr()
     assert "FAILED" in captured.out
     assert "OK" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# D11 — --no-separate removed
+# ---------------------------------------------------------------------------
+
+def test_no_separate_flag_removed(tmp_path):
+    from guitar_helper.run_batch import main
+    sys.argv = ["run_batch", str(tmp_path), "--no-separate"]
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_audio_extensions_matches_supported_suffixes():
+    assert _AUDIO_EXTENSIONS == SUPPORTED_SUFFIXES

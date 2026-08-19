@@ -368,7 +368,9 @@ def test_reanalysis_guard_fires_after_gui_edit_and_save(window, qtbot):
 
     assert any(s.manually_corrected for s in win._app.store.get_segments(hashes[0]))
 
-    pipeline = AnalysisPipeline(win._app.store)
+    from guitar_helper.analysis.source_separator import NullSeparator
+
+    pipeline = AnalysisPipeline(win._app.store, separator=NullSeparator())
     with pytest.raises(ManualCorrectionsExistError):
         pipeline.run(win.wav_paths[0])
 

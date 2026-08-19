@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from guitar_helper.analysis.pipeline import AnalysisPipeline, ManualCorrectionsExistError
-from guitar_helper.analysis.source_separator import AudioSeparator, NullSeparator
+from guitar_helper.analysis.source_separator import AudioSeparator
 from guitar_helper.analysis.tone_classifier import ThresholdClassifier
 from guitar_helper.config import add_config_args, config_from_args
 from guitar_helper.db.repository import SQLiteSegmentStore
@@ -34,7 +34,6 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=None, help="Force segment count (default: auto-detect)")
     parser.add_argument("--verbose", action="store_true", help="Print segmenter diagnostics")
     parser.add_argument("--hpss", action="store_true", help="Isolate harmonic content before feature extraction")
-    parser.add_argument("--no-separate", action="store_true", help="Skip guitar source separation (analyse full mix)")
     parser.add_argument("--discard-corrections", action="store_true",
                         help="Overwrite this track's manual corrections (default: refuse)")
     add_config_args(parser)
@@ -51,15 +50,9 @@ def main() -> None:
         print(f"  k={args.k} (forced)")
     if args.hpss:
         print("  HPSS enabled")
-    if args.no_separate:
-        print("  guitar separation disabled (full mix)")
 
     model_dir = str(cfg.model_dir) if cfg.model_dir else None
-    separator = (
-        NullSeparator()
-        if args.no_separate
-        else AudioSeparator(cache_dir=str(cfg.stems_dir), model_dir=model_dir, verbose=args.verbose)
-    )
+    separator = AudioSeparator(cache_dir=str(cfg.stems_dir), model_dir=model_dir, verbose=args.verbose)
 
     conn = init_db(str(cfg.db_path))
     store = SQLiteSegmentStore(conn)

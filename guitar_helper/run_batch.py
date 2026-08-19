@@ -16,15 +16,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from guitar_helper.analysis.audio_loader import AudioLoader
+from guitar_helper.analysis.environment import SUPPORTED_SUFFIXES
 from guitar_helper.analysis.pipeline import AnalysisPipeline, ManualCorrectionsExistError
-from guitar_helper.analysis.source_separator import AudioSeparator, NullSeparator
+from guitar_helper.analysis.source_separator import AudioSeparator
 from guitar_helper.analysis.tone_classifier import ThresholdClassifier
 from guitar_helper.config import add_config_args, config_from_args
 from guitar_helper.db.interfaces import Segment
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
 
-_AUDIO_EXTENSIONS = {".wav", ".flac", ".ogg", ".aiff", ".mp3", ".m4a", ".aac"}
+_AUDIO_EXTENSIONS = SUPPORTED_SUFFIXES
 
 
 @dataclass
@@ -78,7 +79,6 @@ def main() -> None:
     parser.add_argument("--reanalyze", action="store_true", help="Re-run even if segments already in DB")
     parser.add_argument("--discard-corrections", action="store_true",
                         help="Overwrite manual corrections when re-analysing (default: preserve)")
-    parser.add_argument("--no-separate", action="store_true", help="Skip guitar source separation")
     parser.add_argument("--hpss", action="store_true", help="Isolate harmonic content before features")
     parser.add_argument("--verbose", action="store_true", help="Print segmenter diagnostics per song")
     add_config_args(parser)
@@ -103,11 +103,7 @@ def main() -> None:
     conn = init_db(str(cfg.db_path))
     store = SQLiteSegmentStore(conn)
     model_dir = str(cfg.model_dir) if cfg.model_dir else None
-    separator = (
-        NullSeparator()
-        if args.no_separate
-        else AudioSeparator(cache_dir=str(cfg.stems_dir), model_dir=model_dir, verbose=args.verbose)
-    )
+    separator = AudioSeparator(cache_dir=str(cfg.stems_dir), model_dir=model_dir, verbose=args.verbose)
     classifier = ThresholdClassifier(calibration_path=cfg.archetypes_path)
     pipeline = AnalysisPipeline(
         store, classifier=classifier, separator=separator,
