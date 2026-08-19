@@ -4,33 +4,30 @@ Working checklist. **`docs/plans/mvp-implementation-plan.md` is the authority** 
 scope and ordering — this file is the scannable view, not a second source of truth.
 If the two disagree, the plan wins.
 
-_Updated 2026-08-19. Gate 1 done; Gate 2 done except `delete_track`; Gate 3 groundwork done.
-459 tests, CI green._
+_Updated 2026-08-19. Gates 1–3 done; Gate 4 done; Gate 6 done except the final
+SAVE_STATE pass. 549 tests, ruff clean. **Gate 5 (packaging) is the only gate left**,
+plus live rig verification._
 
 ---
 
-## Next — Wave 2: the last release blocker (ISSUE-007)
+## Next — live verification on the rig (settles D3)
 
-A user still cannot add a song without a terminal. Everything here is serial: one
-component depending on all three of last night's lanes.
+Wave 2 shipped the whole GUI ingestion path. Nothing else is code-blocked; what
+remains is the by-ear check the plan insisted on rather than inferred.
 
-- [ ] `delete_track(file_hash)` — one transaction over `segments`, `segments_calibration`,
-      `playlist_tracks`, then `tracks`. `playlist_tracks.file_hash` has **no** ON DELETE
-      CASCADE, so a bare delete FK-errors *(Gate 2 §4.3 — the only Gate 2 item left)*
-- [ ] Home "Remove from library" — confirmation must name the corrected-segment count
-- [ ] `AnalysisWorker` QThread over the `analyse` / `persist` split
-- [ ] Add-songs dialog + progress dialog with Cancel ("Finishing current song…", never a freeze)
-- [ ] Home wiring: Add button, right-click entry, **rename "Analyze" → "Correct labels"**
-- [ ] Main-window wiring: persist on `fileDone`, `home.refresh()` on finish *(also closes H4)*
-- [ ] Live verification on the rig: multi-song add · remove-and-re-add · cancel mid-separation
-      then a clean re-run · **playback-during-analysis checked by ear** *(settles decision D3)*
+- [ ] Multi-song add through **Add songs…** — real files, real separation
+- [ ] Remove-and-re-add: labels reset, separation is **not** repeated (stem kept, D5)
+- [ ] Cancel mid-separation, then a clean re-run — the cancelled stem must not poison the cache
+- [ ] **Playback during analysis, checked by ear** *(settles D3)*. The "Pause playback
+      while analysing" option ships defaulted **off**; if you hear dropouts, tick it and
+      the default flips to on. ISSUE-005's lesson is that code inspection is a hypothesis
 
-## Gate 4 — robustness
+## Gate 4 — robustness — **DONE**
 
-- [ ] **H1** app refuses to start without loopMIDI → null port + persistent "MIDI disabled" banner
-- [ ] **H2** only `NoSegmentsError` caught around `attach()` → catch broadly, keep previous track playing
-- [ ] **H3** correction CLI skips `ensure_calibration_copy` → call it in the save path
-- [ ] **H5** bare `except Exception` misreports playlist failures → catch `sqlite3.IntegrityError`
+- [x] **H1** null `NullMidiPort` fallback + persistent "MIDI disabled" banner
+- [x] **H2** `attach()` failures caught broadly; the previous track keeps playing
+- [x] **H3** correction CLI saves through the atomic `apply_edits`, which snapshots first
+- [x] **H5** playlist creation catches `sqlite3.IntegrityError` only; other errors surface
 
 ## Gate 5 — packaging
 
@@ -50,16 +47,22 @@ component depending on all three of last night's lanes.
 
 ## Gate 6 — documentation
 
-- [ ] User guide for the three modes + a Help entry point
-- [ ] Coding conventions in the README / contributor section — they live only in `CLAUDE.md`
-      today, which a human contributor has no reason to open
-- [ ] Final `SAVE_STATE.md` pass
+- [x] User guide for the three modes (`docs/user-guide.md`) + Help menu entry point
+- [x] Coding conventions in the README contributor section
+- [x] `README.md` + `LICENSE` (MIT — **confirm the copyright holder**, see below)
+- [x] Final `SAVE_STATE.md` pass
 
 ---
 
 ## Small carry-overs
 
-- [ ] `run_calibrate.py:14` still tells the reader not to pass `--no-separate`, which no longer exists
+- [x] `run_calibrate.py` docstring no longer references the removed `--no-separate`
+- [ ] **Confirm the `LICENSE`**: MIT / "Aryan Kumar" / 2026 was chosen by default, not from
+      evidence. Check it against the private `VespralSquid/guitar-helper` remote, and against
+      the Demucs weight licence before those weights are redistributed in Gate 5
+- [ ] `_read_tags` is duplicated between `ui/analysis_worker.py` and `run_batch.py`
+- [ ] Output-mode MIDI port picker — with the banner in place, users will expect to fix a
+      missing loopMIDI without relaunching; port selection is still startup-only
 - [ ] Promote `audio_loader._SUPPORTED_NATIVE` / `_SUPPORTED_PYDUB` to public names; drop the
       `run_batch._AUDIO_EXTENSIONS` alias
 - [ ] `source_separator._check_cache` — cognitive complexity 21, refactor candidate (not a ruff failure)

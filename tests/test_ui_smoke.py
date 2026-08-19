@@ -178,7 +178,7 @@ def test_merge_moves_selection_and_shrinks_table(window, qtbot):
 def _analyze_row(win, qtbot, row: int = 0) -> None:
     win.home.song_table.selectRow(row)
     with qtbot.waitSignal(win.loadFinished, timeout=5000):
-        win.home.analyze_button.click()
+        win.home.correct_labels_button.click()
 
 
 def test_analyze_button_enters_analysis_with_header_and_autoplay(window, qtbot):
@@ -502,3 +502,199 @@ def test_test_send_button_reaches_the_midi_port(window, qtbot):
     win.output.test_send_button.click()
 
     assert win._app.port.sent == [(0, 4)]
+
+
+# ----------------------------------------------------------------------
+# Ingestion (ISSUE-007) — stubbed analysis, never a real separation
+# ----------------------------------------------------------------------
+
+def _stub_add_songs_dialog(monkeypatch, options):
+    from guitar_helper.ui import main_window as mw
+
+    class _StubDialog:
+        def __init__(self, _store, _config, *, preselected_playlist_id=None, parent=None):
+            self.preselected_playlist_id = preselected_playlist_id
+
+        def exec(self):
+            return 1
+
+        def options(self):
+            return options
+
+    monkeypatch.setattr(mw, "AddSongsDialog", _StubDialog)
+
+
+def _stub_pipeline(monkeypatch, win, canned_for):
+    """Real pipeline for precheck/persist (so the store contract is exercised);
+    analyse() is stubbed because a real one costs minutes of separation."""
+    from pathlib import Path
+
+    from guitar_helper.analysis.audio_loader import AudioLoader
+    from guitar_helper.analysis.pipeline import AnalysisPipeline, AnalysisResult, Stage
+    from guitar_helper.analysis.source_separator import NullSeparator
+    from guitar_helper.ui import main_window as mw
+    from tests.conftest import make_segment
+
+    pipeline = AnalysisPipeline(win._app.store, separator=NullSeparator())
+    seen_stages: list[str] = []
+
+    def _fake_analyse(path, *, title=None, artist=None, k=None, progress=None, should_cancel=None):
+        for stage in (Stage.HASHING, Stage.SEPARATING, Stage.CLASSIFYING):
+            if should_cancel is not None and should_cancel():
+                raise AssertionError("cancel is not exercised by these tests")
+            if progress is not None:
+                progress(stage)
+            seen_stages.append(str(stage))
+        file_hash = AudioLoader().hash_file(path)
+        return AnalysisResult(
+            file_hash=file_hash,
+            duration_ms=3000,
+            filename=Path(path).name,
+            source_path=str(Path(path).resolve()),
+            stem_path=str(path),
+            title=None,
+            artist=None,
+            segments=[
+                make_segment(file_hash, 0, 1500, "clean"),
+                make_segment(file_hash, 1500, 3000, "metal"),
+            ],
+        )
+
+    monkeypatch.setattr(pipeline, "analyse", _fake_analyse)
+    monkeypatch.setattr(mw, "build_pipeline", lambda *_a, **_k: pipeline)
+    canned_for.append(seen_stages)
+    return pipeline
+
+
+def test_add_songs_analyses_persists_and_refreshes_home(window, qtbot, make_wav, monkeypatch):
+    from guitar_helper.analysis.audio_loader import AudioLoader
+    from guitar_helper.ui.dialogs.add_songs import AddSongsOptions
+
+    win, _hashes = window
+    new_wav = make_wav("newsong.wav", duration_s=3.0, sr=22050)
+    new_hash = AudioLoader().hash_file(new_wav)
+    assert win._app.store.get_segments(new_hash) == []
+
+    stages: list = []
+    _stub_pipeline(monkeypatch, win, stages)
+    _stub_add_songs_dialog(monkeypatch, AddSongsOptions(
+        paths=(new_wav,), reanalyse_existing=False,
+        target_playlist_id=None, pause_playback=False,
+    ))
+
+    before = len(win.home.track_model.tracks)
+    win._on_add_songs_requested(None)
+    qtbot.waitUntil(lambda: win._analysis_worker is None, timeout=5000)
+
+    segments = win._app.store.get_segments(new_hash)
+    assert [s.tone_label for s in segments] == ["clean", "metal"]
+    assert len(win.home.track_model.tracks) == before + 1
+    assert stages[0]  # the worker reported stage progress
+
+
+def test_add_songs_adds_to_the_target_playlist(window, qtbot, make_wav, monkeypatch):
+    from guitar_helper.analysis.audio_loader import AudioLoader
+    from guitar_helper.ui.dialogs.add_songs import AddSongsOptions
+
+    win, _hashes = window
+    playlist_id = win._app.store.create_playlist("Practice")
+    new_wav = make_wav("newsong2.wav", duration_s=3.5, sr=22050)
+    new_hash = AudioLoader().hash_file(new_wav)
+
+    _stub_pipeline(monkeypatch, win, [])
+    _stub_add_songs_dialog(monkeypatch, AddSongsOptions(
+        paths=(new_wav,), reanalyse_existing=False,
+        target_playlist_id=playlist_id, pause_playback=False,
+    ))
+
+    win._on_add_songs_requested(playlist_id)
+    qtbot.waitUntil(lambda: win._analysis_worker is None, timeout=5000)
+
+    assert [t.file_hash for t in win._app.store.get_playlist_tracks(playlist_id)] == [new_hash]
+
+
+def test_corrected_track_is_never_reanalysed_through_the_gui(window, qtbot, monkeypatch):
+    """Mirrors the CLI-side guard: the GUI must not offer a path that destroys
+    manual corrections, even with 'Re-analyse existing' ticked."""
+    from guitar_helper.ui.dialogs.add_songs import AddSongsOptions
+
+    win, _hashes = window
+    corrected_wav = win.wav_paths[0]  # seeded with a manually_corrected segment
+    _stub_pipeline(monkeypatch, win, [])
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "guitar_helper.ui.main_window.QMessageBox.information",
+        staticmethod(lambda _p, _t, text, *a, **k: shown.append(text)),
+    )
+    _stub_add_songs_dialog(monkeypatch, AddSongsOptions(
+        paths=(corrected_wav,), reanalyse_existing=True,
+        target_playlist_id=None, pause_playback=False,
+    ))
+
+    win._on_add_songs_requested(None)
+
+    assert win._analysis_worker is None  # never started
+    assert "corrected segment" in shown[0]
+
+
+def test_already_analysed_track_is_skipped_without_the_reanalyse_option(
+    window, qtbot, make_wav, monkeypatch
+):
+    from guitar_helper.analysis.audio_loader import AudioLoader
+    from guitar_helper.ui.dialogs.add_songs import AddSongsOptions
+    from tests.conftest import make_segment
+
+    win, _hashes = window
+    wav = make_wav("uncorrected.wav", duration_s=4.0, sr=22050)
+    file_hash = AudioLoader().hash_file(wav)
+    win._app.store.save_track(file_hash, "uncorrected.wav", None, None, 4000, str(wav))
+    win._app.store.save_segments(file_hash, [make_segment(file_hash, 0, 4000, "clean")])
+
+    _stub_pipeline(monkeypatch, win, [])
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "guitar_helper.ui.main_window.QMessageBox.information",
+        staticmethod(lambda _p, _t, text, *a, **k: shown.append(text)),
+    )
+    _stub_add_songs_dialog(monkeypatch, AddSongsOptions(
+        paths=(wav,), reanalyse_existing=False,
+        target_playlist_id=None, pause_playback=False,
+    ))
+
+    win._on_add_songs_requested(None)
+    assert win._analysis_worker is None
+    assert "Re-analyse existing" in shown[0]
+
+
+def test_home_is_disabled_while_an_analysis_run_is_live(window):
+    win, _hashes = window
+    win._analysis_worker = object()
+    win._set_loading(False)
+    assert not win.home.isEnabled()
+    win._analysis_worker = None
+    win._set_loading(False)
+    assert win.home.isEnabled()
+
+
+def test_midi_banner_hidden_when_midi_is_available(window):
+    win, _hashes = window
+    assert win._app.midi_available
+    assert win.midi_banner.isHidden()
+
+
+def test_removing_the_loaded_track_stops_playback(window, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    win, hashes = window
+    _analyze_row(win, qtbot, 0)
+    assert win._state.file_hash == hashes[0]
+
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes),
+    )
+    track = next(t for t in win._app.store.list_tracks() if t.file_hash == hashes[0])
+    assert win.home.remove_from_library(track)
+
+    assert win._state.file_hash is None
+    assert win._app.store.get_segments(hashes[0]) == []

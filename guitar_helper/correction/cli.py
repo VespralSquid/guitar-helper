@@ -144,8 +144,11 @@ class SegmentCorrectionTool:
                 continue
 
             if raw == "s":
-                for idx, updated in pending.items():
-                    self._store.update_segment(updated)
+                # apply_edits, not update_segment: it snapshots the pre-edit
+                # segments into segments_calibration first, so CLI corrections
+                # stay usable as calibration ground truth (matches EditorState.save).
+                if pending:
+                    self._store.apply_edits(file_hash, list(pending.values()), [])
                 print(f"Saved {len(pending)} change(s).")
                 return
 

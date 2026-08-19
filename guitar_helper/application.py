@@ -15,7 +15,12 @@ from guitar_helper.db.interfaces import IAppStore
 from guitar_helper.db.repository import SQLiteSegmentStore
 from guitar_helper.db.schema import init_db
 from guitar_helper.midi.interfaces import IMidiPort
-from guitar_helper.midi.mido_port import DEFAULT_PORT_NAME, MidoPort
+from guitar_helper.midi.mido_port import (
+    DEFAULT_PORT_NAME,
+    MidiPortNotFoundError,
+    MidoPort,
+)
+from guitar_helper.midi.null_port import NullMidiPort
 from guitar_helper.playback.audio_buffer import AudioBuffer
 from guitar_helper.playback.dispatch_log import DispatchLogBuffer
 from guitar_helper.playback.latency_probe import DispatchProbe
@@ -54,7 +59,19 @@ class Application:
             self._conn = init_db(str(config.db_path))
             store = SQLiteSegmentStore(self._conn)
         self.store = store
-        self.port = port or MidoPort(port_name)
+        # A missing loopMIDI must not block the app: segment review and
+        # correction need no MIDI at all, so fall back to an inert port and
+        # let the UI surface `midi_error`. An injected port is always honoured.
+        self.midi_available = True
+        self.midi_error: str | None = None
+        if port is None:
+            try:
+                port = MidoPort(port_name)
+            except MidiPortNotFoundError as exc:
+                port = NullMidiPort()
+                self.midi_available = False
+                self.midi_error = str(exc)
+        self.port = port
         self.viz = VisualizationBridge()
         # Survives track changes — the dispatcher is rebuilt per track, the log
         # is not, so the Output panel keeps its history across a load.

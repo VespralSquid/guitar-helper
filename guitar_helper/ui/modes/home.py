@@ -7,6 +7,8 @@ playlist. Playlist CRUD and membership go straight to the store (main-thread
 reads/writes, per the threading invariant)."""
 from __future__ import annotations
 
+import sqlite3
+
 from PySide6.QtCore import QModelIndex, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -30,11 +32,17 @@ _PLAYLIST_ID_ROLE = Qt.ItemDataRole.UserRole  # int | None (None = virtual Libra
 _PLAYLIST_NAME_ROLE = Qt.ItemDataRole.UserRole + 1  # clean name, no " (count)" suffix
 _NEW_PLAYLIST = "New playlist"
 _LIBRARY_NAME = "Library"
+_ADD_SONGS = "Add songs…"
+_REMOVE_FROM_LIBRARY = "Remove from library"
 
 
 class HomeMode(QWidget):
     playRequested = Signal(object, int)  # (list[Track] queue, start index)
-    analyzeRequested = Signal(str, object, int)  # playlist_name, list[Track], start_index
+    # Opens already-analysed tracks in the segment editor. Named for what it
+    # does: the button used to say "Analyze", which is what Add songs does.
+    correctLabelsRequested = Signal(str, object, int)  # playlist_name, list[Track], start_index
+    addSongsRequested = Signal(object)  # playlist_id (int) or None for the virtual Library
+    trackRemoved = Signal(str)  # file_hash, after the row is gone from the DB
 
     def __init__(self, store, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -45,11 +53,16 @@ class HomeMode(QWidget):
             "No playlists yet — create your first playlist to organise your library."
         )
         self.hint_label.setWordWrap(True)
+        self.empty_library_label = QLabel(
+            "Your library is empty. Click “Add songs…” to analyse your first track."
+        )
+        self.empty_library_label.setWordWrap(True)
 
         self.playlist_list = QListWidget()
         self.playlist_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.new_playlist_button = QPushButton(_NEW_PLAYLIST)
-        self.analyze_button = QPushButton("Analyze")
+        self.add_songs_button = QPushButton(_ADD_SONGS)
+        self.correct_labels_button = QPushButton("Correct labels")
 
         self.track_model = TrackTableModel()
         self.song_table = QTableView()
@@ -65,11 +78,13 @@ class HomeMode(QWidget):
         left_layout.addWidget(QLabel("Playlists"))
         left_layout.addWidget(self.playlist_list, stretch=1)
         left_layout.addWidget(self.new_playlist_button)
-        left_layout.addWidget(self.analyze_button)
+        left_layout.addWidget(self.add_songs_button)
+        left_layout.addWidget(self.correct_labels_button)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.addWidget(self.hint_label)
+        right_layout.addWidget(self.empty_library_label)
         right_layout.addWidget(self.song_table, stretch=1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -85,9 +100,10 @@ class HomeMode(QWidget):
         self.playlist_list.currentItemChanged.connect(self._on_playlist_selected)
         self.playlist_list.customContextMenuRequested.connect(self._on_playlist_menu)
         self.new_playlist_button.clicked.connect(self._on_new_playlist)
+        self.add_songs_button.clicked.connect(self._on_add_songs_clicked)
         self.song_table.doubleClicked.connect(self._on_song_double_clicked)
         self.song_table.customContextMenuRequested.connect(self._on_song_menu)
-        self.analyze_button.clicked.connect(self._on_analyze_clicked)
+        self.correct_labels_button.clicked.connect(self._on_correct_labels_clicked)
 
         self.refresh()
 
@@ -136,7 +152,7 @@ class HomeMode(QWidget):
         else:
             tracks = self._store.get_playlist_tracks(playlist_id)
         self.track_model.set_tracks(tracks)
-        self.analyze_button.setEnabled(bool(tracks))
+        self.correct_labels_button.setEnabled(bool(tracks))
 
     def _refresh_stats(self) -> None:
         tracks = self._store.list_tracks()
@@ -145,6 +161,7 @@ class HomeMode(QWidget):
         self.stats_label.setText(
             f"{len(tracks)} tracks · {total_segments} segments · {fully} fully corrected"
         )
+        self.empty_library_label.setVisible(not tracks)
 
     # ------------------------------------------------------------------
     # slots
@@ -159,13 +176,16 @@ class HomeMode(QWidget):
         if track.source_path:
             self.playRequested.emit(tracks, index.row())
 
-    def _on_analyze_clicked(self) -> None:
+    def _on_correct_labels_clicked(self) -> None:
         tracks = self.track_model.tracks
         if not tracks:
             return
         rows = self.song_table.selectionModel().selectedRows()
         start_index = rows[0].row() if rows else 0
-        self.analyzeRequested.emit(self.current_playlist_name(), tracks, start_index)
+        self.correctLabelsRequested.emit(self.current_playlist_name(), tracks, start_index)
+
+    def _on_add_songs_clicked(self) -> None:
+        self.addSongsRequested.emit(self.current_playlist_id())
 
     def _on_new_playlist(self) -> None:
         name, ok = QInputDialog.getText(self, _NEW_PLAYLIST, "Playlist name:")
@@ -174,19 +194,26 @@ class HomeMode(QWidget):
             return
         try:
             self._store.create_playlist(name)
-        except Exception:
+        except sqlite3.IntegrityError:
             QMessageBox.warning(self, _NEW_PLAYLIST, f"A playlist named {name!r} already exists.")
             return
         self.refresh()
 
     def _on_playlist_menu(self, pos: QPoint) -> None:
         item = self.playlist_list.itemAt(pos)
-        if item is None or item.data(_PLAYLIST_ID_ROLE) is None:
-            return  # no context actions on the virtual Library
+        if item is None:
+            return
+        playlist_id = item.data(_PLAYLIST_ID_ROLE)
         menu = QMenu(self)
-        delete_action = menu.addAction("Delete playlist")
-        if menu.exec(self.playlist_list.mapToGlobal(pos)) is delete_action:
-            self._store.delete_playlist(item.data(_PLAYLIST_ID_ROLE))
+        add_action = menu.addAction("Add songs to this playlist")
+        # The virtual Library is not a row anyone can delete.
+        delete_action = menu.addAction("Delete playlist") if playlist_id is not None else None
+
+        chosen = menu.exec(self.playlist_list.mapToGlobal(pos))
+        if chosen is add_action:
+            self.addSongsRequested.emit(playlist_id)
+        elif delete_action is not None and chosen is delete_action:
+            self._store.delete_playlist(playlist_id)
             self.refresh()
 
     def _on_song_menu(self, pos: QPoint) -> None:
@@ -206,6 +233,8 @@ class HomeMode(QWidget):
         playlist_id = self.current_playlist_id()
         if playlist_id is not None:
             remove_action = menu.addAction("Remove from this playlist")
+        menu.addSeparator()
+        delete_action = menu.addAction(_REMOVE_FROM_LIBRARY)
 
         chosen = menu.exec(self.song_table.viewport().mapToGlobal(pos))
         if chosen is None:
@@ -216,3 +245,44 @@ class HomeMode(QWidget):
         elif chosen is remove_action:
             self._store.remove_from_playlist(playlist_id, track.file_hash)
             self.refresh()
+        elif chosen is delete_action:
+            self.remove_from_library(track)
+
+    # ------------------------------------------------------------------
+    # library removal
+    # ------------------------------------------------------------------
+
+    def remove_from_library(self, track: Track) -> bool:
+        """Confirm, then delete the track and everything referencing it.
+
+        The confirmation names the corrected-segment count because those are
+        calibration ground truth and the project has already lost a set once —
+        a generic "Are you sure?" does not put that cost in front of the
+        decision."""
+        if not self._confirm_removal(track):
+            return False
+        self._store.delete_track(track.file_hash)
+        self.refresh()
+        self.trackRemoved.emit(track.file_hash)
+        return True
+
+    def _confirm_removal(self, track: Track) -> bool:
+        title = track.title or track.filename
+        if track.corrected_count:
+            plural = "" if track.corrected_count == 1 else "s"
+            cost = (
+                f"This will permanently delete {track.corrected_count} corrected "
+                f"segment{plural}, which cannot be recovered."
+            )
+        else:
+            cost = f"This will delete its {track.total_count} analysed segments."
+        choice = QMessageBox.warning(
+            self,
+            _REMOVE_FROM_LIBRARY,
+            f"Remove “{title}” from your library?\n\n{cost}\n\n"
+            "The audio file itself is not touched, and the separated guitar stem "
+            "is kept — re-adding this file will not repeat separation.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return choice == QMessageBox.StandardButton.Yes

@@ -53,3 +53,6 @@ audio-separator-models/
 
 # Experiment outputs (EXP-NNN harness raw output, regenerable — not committed)
 results/
+
+# MVP Wave 2 restore point (local DB backup)
+.backup-mvp-wave2/

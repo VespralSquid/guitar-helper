@@ -29,7 +29,7 @@ import time
 
 from guitar_helper.application import Application, NoSegmentsError
 from guitar_helper.config import add_config_args, config_from_args
-from guitar_helper.midi.mido_port import DEFAULT_PORT_NAME, MidiPortNotFoundError
+from guitar_helper.midi.mido_port import DEFAULT_PORT_NAME
 from guitar_helper.midi.mock_port import MockMidiPort
 from guitar_helper.playback.latency_probe import DispatchProbe, Samples, Summary
 
@@ -80,10 +80,14 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     port = MockMidiPort() if args.mock else None
-    try:
-        app = Application(cfg, port=port, port_name=args.port_name, channel=args.channel)
-    except MidiPortNotFoundError as exc:
-        print(exc, file=sys.stderr)
+    app = Application(cfg, port=port, port_name=args.port_name, channel=args.channel)
+    # The GUI falls back to a null port so label review still works without
+    # loopMIDI. These CLIs exist to drive MIDI, so a null port is a hard failure
+    # here — measuring dispatch latency against no-ops would print numbers that
+    # look like a calibration result and are not one.
+    if not app.midi_available:
+        print(app.midi_error, file=sys.stderr)
+        app.shutdown()
         sys.exit(2)
 
     probe = DispatchProbe()

@@ -23,6 +23,15 @@ _UPDATE_SEGMENT_SQL = """
 
 _DELETE_SEGMENT_SQL = "DELETE FROM segments WHERE id = ?"
 
+# Order matters: playlist_tracks.file_hash references tracks with no
+# ON DELETE CASCADE, so the tracks row must go last.
+_DELETE_TRACK_SQL = (
+    "DELETE FROM segments WHERE file_hash = ?",
+    "DELETE FROM segments_calibration WHERE file_hash = ?",
+    "DELETE FROM playlist_tracks WHERE file_hash = ?",
+    "DELETE FROM tracks WHERE file_hash = ?",
+)
+
 _CALIBRATION_COPY_SQL = """
     INSERT INTO segments_calibration
         (file_hash, start_ms, end_ms, tone_label, confidence, manually_corrected)
@@ -242,6 +251,11 @@ class SQLiteSegmentStore(IAppStore, IPlaylistStore):
             """
         ).fetchall()
         return [_row_to_track(r) for r in rows]
+
+    def delete_track(self, file_hash: str) -> None:
+        with self._conn:
+            for statement in _DELETE_TRACK_SQL:
+                self._conn.execute(statement, (file_hash,))
 
     # ------------------------------------------------------------------
     # Playlists

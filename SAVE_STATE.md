@@ -1,7 +1,7 @@
 # Save State — Guitar Helper
-_Last updated: 2026-08-18_
+_Last updated: 2026-08-19_
 
-Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul-plan.md` roadmap is complete. 459 tests passing, committed tree ruff-clean. Work has shifted from features to **MVP release readiness**. Gates 1–2 partially done; Gate 3 groundwork done.
+Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul-plan.md` roadmap is complete. 549 tests passing, committed tree ruff-clean. **Gates 1-4, 6 complete; Gate 5 (packaging) only gate left, plus live rig verification**.
 
 ## READ FIRST
 - **`docs/plans/mvp-implementation-plan.md`** — master execution plan: 6 gates, ordering rationale, how each is accomplished. Everything below is context for it.
@@ -10,22 +10,33 @@ Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul
 - `docs/architecture/ARCHITECTURE.md` — component map, 17 numbered design decisions (D1-D17), threading contract.
 
 ## MVP blockers (remaining)
-- **ISSUE-007** — GUI cannot add or analyse songs; **no ingestion path exists.** Qt-free tier split done (`922bf00`); the `AnalysisWorker`, progress dialog, Home wiring, and `delete_track` capability still outstanding. Resolved in Gate 3 Wave 2.
-- **Packaging: nothing exists.** No pyproject/README/LICENSE/PyInstaller spec. `ui/state/` is an implicit namespace package (PyInstaller misses these). db/stems/archetypes resolve to CWD. Gate 5.
+- **Gate 5 — Packaging.** `pyproject.toml` (fully pinned), PyInstaller spec, app data in `%LOCALAPPDATA%`, bundle archetypes.json, htdemucs_6s, torch+onnxruntime. Clean-machine test + README.
+
+## Gate 3 (ISSUE-007) — RESOLVED
+GUI ingestion path built end-to-end: `AnalysisWorker` (QThread), progress dialogs, Home "Add songs…" button + playlist right-click, File menu entry. `delete_track` on `ITrackEditor` role (mixed into `IAppStore`, not `ISegmentStore`); Home right-click "Remove from library" warns with corrected-segment count, caches stem (D5).
+
+## Gate 4 — RESOLVED
+**H1:** NullMidiPort fallback + persistent "MIDI disabled" banner (no loopMIDI required). **H2:** `attach()` failures caught broadly, previous track keeps playing. **H3:** correction CLI saves via atomic `apply_edits` (snapshots first). **H5:** playlist creation catches `sqlite3.IntegrityError` only.
+
+## Gate 6 — RESOLVED
+README.md, LICENSE (MIT / Aryan Kumar / 2026 — **unconfirmed**, needs deliberate decision before Gate 5 redistributes weights), user-guide.md, Help menu entry.
 
 ## Resolved (ISSUE-006/008, B1, schema v10)
-- **B1 — `save_segments` not transactional.** RESOLVED (`afa150d`): wrapped in a single transaction; `EditorState.save()` uses new atomic `apply_edits()` method.
-- **ISSUE-006** — preset-map divergence. RESOLVED (`afa150d`): option A implemented — `presets.user_modified` column, v10 migration reconciles non-user-modified rows, partial UNIQUE index, Output-mode divergence banner. All traps honoured; five migration tests added; live DB migrated intact.
-- **ISSUE-008** — stem-cache poisoning. RESOLVED (`eb05ffd`): atomic publish + completion manifest + validation on hit; sampled digest promoted to mandatory (zero-fill cannot be caught by byte-size alone). Nine existing stems grandfathered.
+- **B1 — `save_segments` not transactional.** RESOLVED: wrapped in transaction; `EditorState.save()` uses atomic `apply_edits()`.
+- **ISSUE-006** — preset-map divergence. RESOLVED: option A — `presets.user_modified` column, v10 migration reconciles non-user-modified rows, partial UNIQUE index. Live DB migrated intact.
+- **ISSUE-008** — stem-cache poisoning. RESOLVED: atomic publish + completion manifest + validation on hit; sampled digest mandatory.
 
-## Product decisions (2026-08-04)
-- **No songs and no database ship.** Library entirely user-supplied. Only `archetypes.json` ships.
-- **Separation is MANDATORY — the full mix is NEVER analysed.** Stem first, analyse the stem only. Justification (resubstitution scores, so biased, but the comparison is valid): stem vs full-mix over the 123 labelled segments = accuracy .821 vs .463; crunch F1 .89 vs .13 (27/29 crunch -> metal); overdrive .62 vs .00. Honest generalisation figure remains the EXP-001 LOOCV macro-F1 ~0.69.
-- Violations to fix: `pipeline.py:43` defaults to `NullSeparator` (silent full-mix analysis; 8 of 9 test call sites rely on that default); `--no-separate` on both CLIs.
-- **"Start over on a song" = remove from library + re-add.** No force-reseparate flag. But `delete_track` DOES NOT EXIST — must be built. `playlist_tracks.file_hash` has NO ON DELETE CASCADE, so a bare DELETE FROM tracks FK-errors.
-- Removing a song **warns with the corrected-segment count, then deletes**; transactional. Cached stem is KEPT so re-add is fast.
-- App data -> `%LOCALAPPDATA%\GuitarHelper`, seeded on first run. Bundle the torch/onnxruntime stack AND the htdemucs weights.
-- **OPEN — needed before Gate 1:** ISSUE-006 reconcile strategy A (`presets.user_modified` flag + Output divergence banner, recommended) / B (legacy fingerprint) / C (detect-only).
+## Facts NOT derivable from code
+- **D3 open / needs live rig test.** "Pause playback while analysing" ships defaulted OFF; by-ear test decides the default. Do not settle from code — ISSUE-005 lesson.
+- **LICENSE unconfirmed.** MIT / Aryan Kumar / 2026 picked by default; needs deliberate decision before Gate 5 redistributes Demucs weights (whose licence terms haven't been checked).
+- **`run_playback.py` and `measure_latency.py` check `app.midi_available` post-H1**, exit 2 if absent. Matters for `measure_latency`: measuring dispatch latency against a no-op port prints meaningless numbers.
+- **MIDI port selection is startup-only.** With the banner, users will expect to fix a missing loopMIDI without relaunching; port picker in Output mode is the fix, not in Wave 2 scope.
+- **`Stage` is StrEnum but `Enum.__hash__` hashes the name**, misses on dict lookup by the `.value` string arriving over Qt signal. Key such dicts by `.value`.
+- Restore point: `mvp-wave2-restore-point` tag, plus `.backup-mvp-wave2/library.db.bak` (gitignored).
+
+## Product decisions
+- **No songs/DB ship.** Library user-supplied; only `archetypes.json` ships.
+- **Separation MANDATORY.** Stem first, never analyse full mix. Justification: stem vs full-mix over 123 labelled segments = accuracy .821 vs .463; macro-F1 ~0.69 (stem) vs worse (full-mix). Violations: `pipeline.py:43` defaults to `NullSeparator`, `--no-separate` on CLIs.
 
 ## Two models — do not conflate
 - `archetypes.json` = **3 KB**, 5 tones x 24 floats, OURS, adapts via `run_calibrate`, ships in git.
@@ -74,5 +85,3 @@ Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul
 - Hygiene: 5 stray `.db` files at root, `batch_reanalysis.log`, `print_db.py`.
 - Accepted gap (user-confirmed): the dirty-guard applies only to playlist Analyze/Prev/Next, not to queue Prev/Next or Home double-click.
 
-## Uncommitted
-- `guitar_helper/playback/audio_buffer.py:19` — a `#sample rate` comment with trailing whitespace. W291; committing it turns CI red. The committed tree is clean.

@@ -40,7 +40,7 @@ Tiers 1+2 with no Qt import.
 
 | Module | Responsibility | Key collaborators |
 |---|---|---|
-| `db/schema.py` | DDL, `_CURRENT_VERSION=9`, migration chain, preset seed | — |
+| `db/schema.py` | DDL, `_CURRENT_VERSION=10`, migration chain, preset seed, `reconcile_presets` | — |
 | `db/interfaces.py` | 6 role ABCs + `Segment/Preset/Track/Playlist` dataclasses | — |
 | `db/repository.py` | `SQLiteSegmentStore` — the only SQL in the app (except `run_calibrate`) | `IAppStore`, `IPlaylistStore` |
 | `analysis/audio_loader.py` | hash + duration (no decode), `load_mono`, `decode` | soundfile, librosa, pydub |
@@ -94,21 +94,33 @@ Tiers 1+2 with no Qt import.
 | PortAudio callback | — | `AudioBuffer.data` | `_frame`, `PositionTracker._cursor`, `last_tracker_lead_ms` | No DB/MIDI/UI/alloc |
 | `MidiDispatcher` | `_last_tone`, `_last_pc` | `PositionTracker`, `SegmentLookup`, `_pc_by_tone` dict | MIDI port, `DispatchLogBuffer` | Never touches SQLite |
 | `LoadWorker` (QThread) | — | file bytes | — | Never touches DB or playback objects |
+| `AnalysisWorker` (QThread) | one `AnalysisPipeline` | audio files, stem cache, librosa/torch | stem cache | Never touches SQLite, Qt widgets or playback objects |
 | Qt main | Application graph, the single sqlite3 connection, all widgets | everything | store, dispatcher config | Sole SQLite owner |
+
+`AnalysisWorker` follows the `LoadWorker` shape one tier up: `AnalysisPipeline.analyse()`
+computes on the worker and `persist()` runs in the main-thread `fileDone` slot, so the
+sole-SQLite-owner rule survives ingestion. `precheck()` reads the store and therefore
+also stays on the main thread — the worker is handed its skip/analyse decisions
+pre-computed. Cancellation is polled at stage boundaries only; a separation already in
+flight runs to completion because `Separator.separate()` exposes no abort hook.
 
 Synchronisation primitives: `PlaybackEngine._lock`, `PositionTracker._lock`,
 `DispatchLogBuffer._lock`, `Samples._lock`, `MidiDispatcher._stop` (Event).
 `lookahead_ms` and `_pc_by_tone` rely on atomic attribute rebinding by design.
 
-## 5. Data model (schema v9)
+## 5. Data model (schema v10)
 
 `tracks` · `segments` · `segments_calibration` · `presets` · `playlists` ·
 `playlist_tracks` · `settings` · `schema_version`
 
 - FKs ON. `segments.tone_label → presets.tone_label` — deleting or missing a
   preset row makes segments with that tone unstorable.
-- `presets.pc_number` has **no UNIQUE constraint**; uniqueness is enforced only
-  by `ui/editor/preset_validation.validate_pc`.
+- `presets.pc_number` carries a **partial UNIQUE index** (`idx_presets_pc`, over
+  `pc_number >= 0`) as of schema v10, so `other`'s -1 sentinel can repeat while
+  every dispatched PC stays distinct. `ui/editor/preset_validation.validate_pc`
+  still checks it first so the UI reports a clash instead of an IntegrityError.
+- `presets.user_modified` marks rows the Output panel has edited; the v10
+  migration reconciles only rows where it is 0 (ISSUE-006).
 - Migrations `_MIGRATIONS[2..9]`, applied in order. They mutate preset rows by
   hand and do **not** re-converge on `_DEFAULT_PRESETS` (see the MVP review).
 

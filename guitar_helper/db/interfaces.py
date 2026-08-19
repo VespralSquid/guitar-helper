@@ -72,6 +72,18 @@ class ITrackCatalog(ABC):
         """Return every analysed track with correction-progress counts."""
 
 
+class ITrackEditor(ABC):
+    """Track removal. Separate from ITrackCatalog because deletion is
+    destructive and only the library UI needs it."""
+
+    @abstractmethod
+    def delete_track(self, file_hash: str) -> None:
+        """Remove a track and everything that references it, in one transaction:
+        segments, segments_calibration, playlist_tracks, then the tracks row.
+        Unknown file_hash is a no-op, not an error. The cached stem is NOT
+        touched (decision D5) — re-adding the file skips separation."""
+
+
 class ISegmentReader(ABC):
     """Read-only segment access — playback and lookup paths only need this."""
 
@@ -195,8 +207,8 @@ class ISegmentStore(ITrackCatalog, ISegmentReader, ISegmentEditor, IPresetStore)
     New code should type-hint the specific role ABC it needs instead."""
 
 
-class IAppStore(ISegmentStore, ISettingsStore):
+class IAppStore(ISegmentStore, ISettingsStore, ITrackEditor):
     """What the composition root binds: the segment/track/preset roles plus
-    persisted settings. Kept separate from ISegmentStore so implementers that
-    only handle segments (test doubles, the analysis pipeline) are not forced
-    to grow settings methods they never call."""
+    persisted settings and destructive track removal. Kept separate from
+    ISegmentStore so implementers that only handle segments (test doubles, the
+    analysis pipeline) are not forced to grow methods they never call."""

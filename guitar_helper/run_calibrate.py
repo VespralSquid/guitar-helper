@@ -9,9 +9,9 @@ extract_for_classification() feature vectors from cached stems (or raw audio
 located by content hash under --library-root), computes the per-tone mean,
 and writes archetypes.json.
 
-After running, re-analyse all songs to pick up the new archetypes. Keep separation
-ON (the default) so analysis features come from the same stems the archetypes were
-calibrated on — do NOT pass --no-separate here:
+After running, re-analyse all songs to pick up the new archetypes. Analysis always
+runs on the separated stem, so the features match the stems the archetypes were
+calibrated on:
     python -m guitar_helper.run_batch music\\ --reanalyze
 """
 from __future__ import annotations

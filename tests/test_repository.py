@@ -575,3 +575,115 @@ def test_get_int_setting_falls_back_on_garbage(store):
     """A hand-edited DB must not stop the app from starting."""
     store.set_setting("dispatch_offset_ms", "not-a-number")
     assert store.get_int_setting("dispatch_offset_ms", 75) == 75
+
+
+# ----------------------------------------------------------------------
+# Track deletion (MVP §4.3 — remove-and-re-add)
+# ----------------------------------------------------------------------
+
+def _seed_track(store, db, file_hash: str, filename: str):
+    store.save_track(file_hash, filename, None, None, 60000)
+    store.save_segments(
+        file_hash,
+        [
+            make_segment(file_hash, 0, 1000, tone_label="clean"),
+            make_segment(file_hash, 1000, 2000, tone_label="metal"),
+        ],
+    )
+    store.ensure_calibration_copy(file_hash)
+    playlist_id = store.create_playlist(f"pl-{file_hash}")
+    store.add_to_playlist(playlist_id, file_hash)
+    return playlist_id
+
+
+def _counts(db, file_hash: str) -> dict[str, int]:
+    def count(sql: str) -> int:
+        return db.execute(sql, (file_hash,)).fetchone()[0]
+
+    return {
+        "segments": count("SELECT COUNT(*) FROM segments WHERE file_hash = ?"),
+        "segments_calibration": count(
+            "SELECT COUNT(*) FROM segments_calibration WHERE file_hash = ?"
+        ),
+        "playlist_tracks": count(
+            "SELECT COUNT(*) FROM playlist_tracks WHERE file_hash = ?"
+        ),
+        "tracks": count("SELECT COUNT(*) FROM tracks WHERE file_hash = ?"),
+    }
+
+
+def test_foreign_keys_are_enforced_on_the_test_connection(db):
+    """Without this the FK-ordering tests below would pass vacuously."""
+    assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_delete_track_clears_every_referencing_row(store, db):
+    _seed_track(store, db, "doomed", "doomed.wav")
+    assert _counts(db, "doomed") == {
+        "segments": 2, "segments_calibration": 2, "playlist_tracks": 1, "tracks": 1,
+    }
+
+    store.delete_track("doomed")
+
+    assert _counts(db, "doomed") == {
+        "segments": 0, "segments_calibration": 0, "playlist_tracks": 0, "tracks": 0,
+    }
+    assert store.list_tracks() == []
+
+
+def test_delete_track_in_a_playlist_does_not_raise_foreign_key_error(store, db):
+    """The regression this design exists for: playlist_tracks.file_hash has no
+    ON DELETE CASCADE, so deleting the tracks row first raises IntegrityError."""
+    playlist_id = _seed_track(store, db, "member", "member.wav")
+
+    store.delete_track("member")
+
+    assert store.get_playlist_tracks(playlist_id) == []
+    assert store.list_playlists()[0].track_count == 0
+
+
+def test_delete_track_is_atomic(store, db):
+    _seed_track(store, db, "victim", "victim.wav")
+    db.execute(
+        """
+        CREATE TRIGGER block_track_delete BEFORE DELETE ON tracks
+        BEGIN SELECT RAISE(ABORT, 'no'); END
+        """
+    )
+    db.commit()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.delete_track("victim")
+
+    assert _counts(db, "victim") == {
+        "segments": 2, "segments_calibration": 2, "playlist_tracks": 1, "tracks": 1,
+    }
+    # The pre-fix failure mode surfaced only at the next commit — prove it stays fixed.
+    store.set_setting("unrelated", "write")
+    assert _counts(db, "victim")["segments"] == 2
+
+
+def test_delete_track_unknown_hash_is_a_noop(store, db):
+    _seed_track(store, db, "keeper", "keeper.wav")
+
+    store.delete_track("never-analysed")
+
+    assert _counts(db, "keeper") == {
+        "segments": 2, "segments_calibration": 2, "playlist_tracks": 1, "tracks": 1,
+    }
+
+
+def test_delete_track_leaves_other_tracks_untouched(store, db):
+    _seed_track(store, db, "doomed", "doomed.wav")
+    survivor_playlist = _seed_track(store, db, "survivor", "survivor.wav")
+    store.add_to_playlist(survivor_playlist, "doomed")
+
+    store.delete_track("doomed")
+
+    assert _counts(db, "survivor") == {
+        "segments": 2, "segments_calibration": 2, "playlist_tracks": 1, "tracks": 1,
+    }
+    assert [t.file_hash for t in store.list_tracks()] == ["survivor"]
+    assert [t.file_hash for t in store.get_playlist_tracks(survivor_playlist)] == [
+        "survivor"
+    ]
