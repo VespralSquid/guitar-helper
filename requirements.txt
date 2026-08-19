@@ -1,6 +1,13 @@
 # Tier 1 — Analysis Pipeline
-librosa
+# librosa is pinned: archetypes.json is calibrated against this version's feature
+# output, so a major bump must be a deliberate step with a re-run of run_calibrate,
+# not an incidental resolve. librosa 1.0.0 also drops the audioread dependency.
+librosa==0.11.0
 soundfile
+# pydub imports audioop, removed from the stdlib in 3.13. It arrived transitively
+# via librosa -> audioread -> standard-aifc until librosa 1.0.0 dropped audioread;
+# depending on that chain is what broke CI on 2026-08-19.
+audioop-lts; python_version >= "3.13"
 pydub
 numpy
 mutagen
