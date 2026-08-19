@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from guitar_helper.db.interfaces import ISegmentStore
 from guitar_helper.ui.state.editor_state import EditorState, StateEvent
 from tests.conftest import make_segment
 
@@ -8,6 +11,48 @@ TONE_LABELS = ("clean", "crunch", "metal", "edge", "overdrive", "other")
 
 def _state(store) -> EditorState:
     return EditorState(store, TONE_LABELS)
+
+
+class _RecordingStore:
+    """Delegates to a real backing store, but records which ISegmentEditor
+    methods EditorState actually calls — proves save() goes through
+    apply_edits alone (B1) rather than the old per-row loop."""
+
+    def __init__(self, backing: ISegmentStore) -> None:
+        self._backing = backing
+        self.calls: list[tuple[str, tuple]] = []
+
+    def apply_edits(self, file_hash, updated, deleted_ids):
+        self.calls.append(("apply_edits", (file_hash, updated, deleted_ids)))
+        self._backing.apply_edits(file_hash, updated, deleted_ids)
+
+    def update_segment(self, segment):
+        self.calls.append(("update_segment", (segment,)))
+        self._backing.update_segment(segment)
+
+    def delete_segment(self, segment_id):
+        self.calls.append(("delete_segment", (segment_id,)))
+        self._backing.delete_segment(segment_id)
+
+    def ensure_calibration_copy(self, file_hash):
+        self.calls.append(("ensure_calibration_copy", (file_hash,)))
+        self._backing.ensure_calibration_copy(file_hash)
+
+    def __getattr__(self, name):
+        return getattr(self._backing, name)
+
+
+class _RaisingStore:
+    """A store whose apply_edits always fails — for the failed-save contract."""
+
+    def __init__(self, backing: ISegmentStore) -> None:
+        self._backing = backing
+
+    def apply_edits(self, file_hash, updated, deleted_ids):
+        raise RuntimeError("simulated apply_edits failure")
+
+    def __getattr__(self, name):
+        return getattr(self._backing, name)
 
 
 def test_load_track_populates_segments_and_resets_selection(store, track_hash):
@@ -459,6 +504,53 @@ def test_discard_reverts_to_last_saved_state(store, track_hash):
 
     state.discard()
 
+    assert state.dirty is False
+    assert state.segments[0].tone_label == "clean"
+
+
+def test_save_makes_exactly_one_apply_edits_call(store, track_hash):
+    store.save_segments(
+        track_hash,
+        [
+            make_segment(track_hash, 0, 1000, "clean"),
+            make_segment(track_hash, 1000, 2000, "metal"),
+            make_segment(track_hash, 2000, 3000, "metal"),
+        ],
+    )
+    recording = _RecordingStore(store)
+    state = _state(recording)
+    state.load_track(track_hash)
+    state.relabel(0, "crunch")
+    state.merge_run(1)
+    expected_updated_ids = {s.id for s in state.segments}
+
+    state.save()
+
+    kinds = [name for name, _args in recording.calls]
+    assert kinds == ["apply_edits"]  # not update_segment/delete_segment/ensure_calibration_copy
+    _, (file_hash, updated, deleted_ids) = recording.calls[0]
+    assert file_hash == track_hash
+    assert {s.id for s in updated} == expected_updated_ids
+    assert len(deleted_ids) == 1
+    assert deleted_ids[0] not in expected_updated_ids
+
+
+def test_failing_save_leaves_session_dirty(store, track_hash):
+    store.save_segments(track_hash, [make_segment(track_hash, 0, 1000, "clean")])
+    raising = _RaisingStore(store)
+    state = _state(raising)
+    state.load_track(track_hash)
+    state.relabel(0, "metal")
+    events: list[StateEvent] = []
+    state.subscribe(events.append)
+
+    with pytest.raises(RuntimeError):
+        state.save()
+
+    assert state.dirty is True
+    assert "saved" not in [e.kind for e in events]
+
+    state.discard()  # backing store was never touched — restores the original label
     assert state.dirty is False
     assert state.segments[0].tone_label == "clean"
 

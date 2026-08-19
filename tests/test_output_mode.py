@@ -6,6 +6,8 @@ pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt  # noqa: E402
 
+from guitar_helper.db.interfaces import Preset  # noqa: E402
+from guitar_helper.db.schema import default_preset_map  # noqa: E402
 from guitar_helper.playback.dispatch_log import (  # noqa: E402
     GAP,
     HOLD,
@@ -14,7 +16,13 @@ from guitar_helper.playback.dispatch_log import (  # noqa: E402
     UNMAPPED,
     DispatchEvent,
 )
-from guitar_helper.ui.modes.output import OutputMode, format_event, format_position  # noqa: E402
+from guitar_helper.ui.modes.output import (  # noqa: E402
+    OutputMode,
+    format_divergence_banner,
+    format_event,
+    format_position,
+    preset_divergences,
+)
 
 _PC_COL = 2
 _NAME_COL = 1
@@ -117,6 +125,69 @@ def test_blank_name_is_rejected(qtbot, store):
     with qtbot.waitSignal(output.statusMessage, timeout=1000):
         _edit(output, "metal", _NAME_COL, "   ")
     assert next(p.preset_name for p in store.get_presets() if p.tone_label == "metal") == "Metal"
+
+
+# ----------------------------------------------------------------------
+# divergence banner (ISSUE-006 A2)
+# ----------------------------------------------------------------------
+
+def test_no_banner_on_a_fresh_store(qtbot, store):
+    output = _make_output(qtbot, store)
+    assert output.divergence_banner.isVisible() is False
+    assert output.reset_presets_button.isVisible() is False
+    assert preset_divergences(store.get_presets(), default_preset_map()) == []
+
+
+def test_banner_appears_on_drift(qtbot, store):
+    output = _make_output(qtbot, store)
+    output.show()  # isVisible() requires the widget to actually be shown
+    store.save_preset(Preset(tone_label="clean", preset_name="Clean", pc_number=99))
+
+    output.refresh_presets()
+
+    assert output.divergence_banner.isVisible() is True
+    assert output.reset_presets_button.isVisible() is True
+    assert "clean" in output.divergence_banner.text()
+    assert "99" in output.divergence_banner.text()
+    assert "0" in output.divergence_banner.text()
+
+
+def test_reset_clears_the_banner(qtbot, store):
+    output = _make_output(qtbot, store)
+    output.show()
+    store.save_preset(Preset(tone_label="clean", preset_name="Clean", pc_number=99))
+    output.refresh_presets()
+    assert output.divergence_banner.isVisible() is True
+
+    with qtbot.waitSignal(output.presetsChanged, timeout=1000):
+        output.reset_presets_button.click()
+
+    assert output.divergence_banner.isVisible() is False
+    live_pcs = {p.tone_label: p.pc_number for p in store.get_presets()}
+    assert live_pcs == default_preset_map()
+
+
+def test_preset_divergences_is_unit_tested_without_a_widget():
+    presets = [
+        Preset(tone_label="clean", preset_name="Clean", pc_number=0),
+        Preset(tone_label="metal", preset_name="Rectifier Lead", pc_number=4),
+    ]
+    defaults = {"clean": 0, "metal": 4}
+
+    assert preset_divergences(presets, defaults) == []  # name-only diff never flagged
+
+    drifted = [
+        Preset(tone_label="clean", preset_name="Clean", pc_number=7),
+        Preset(tone_label="metal", preset_name="Metal", pc_number=4),
+    ]
+    assert preset_divergences(drifted, defaults) == [("clean", 7, 0)]
+
+
+def test_format_divergence_banner_names_tone_and_both_pcs():
+    text = format_divergence_banner([("clean", 7, 0)])
+    assert "clean" in text
+    assert "7" in text
+    assert "0" in text
 
 
 # ----------------------------------------------------------------------

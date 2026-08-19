@@ -220,11 +220,9 @@ class EditorState:
     def save(self) -> None:
         if not self.dirty:
             return
-        self._store.ensure_calibration_copy(self._file_hash)
-        for updated in self._pending.values():
-            self._store.update_segment(updated)
-        for seg_id in self._deleted_ids:
-            self._store.delete_segment(seg_id)
+        self._store.apply_edits(
+            self._file_hash, list(self._pending.values()), list(self._deleted_ids)
+        )
         self._pending.clear()
         self._deleted_ids.clear()
         self._emit(StateEvent("dirty"))

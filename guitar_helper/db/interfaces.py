@@ -109,6 +109,21 @@ class ISegmentEditor(ABC):
         """Return the pre-edit calibration snapshot for a track, or [] if
         ensure_calibration_copy has never been called for it."""
 
+    def apply_edits(
+        self, file_hash: str, updated: list[Segment], deleted_ids: list[int]
+    ) -> None:
+        """Persist one edit session — the calibration snapshot, the updates and
+        the deletions — as a single unit.
+
+        This default is a convenience for in-memory implementers and is NOT
+        atomic. Any implementer that owns a transaction must override it.
+        """
+        self.ensure_calibration_copy(file_hash)
+        for segment in updated:
+            self.update_segment(segment)
+        for segment_id in deleted_ids:
+            self.delete_segment(segment_id)
+
 
 class IPresetStore(ABC):
     """Tone-to-PC preset mapping — the MIDI dispatcher's only dependency."""
@@ -120,6 +135,11 @@ class IPresetStore(ABC):
     @abstractmethod
     def save_preset(self, preset: Preset) -> None:
         """Insert or replace a preset row."""
+
+    def reset_presets_to_defaults(self) -> None:
+        """Clear every user_modified flag and re-derive the table from the
+        seeded defaults. Backs the Output-mode divergence banner."""
+        raise NotImplementedError
 
 
 class ISettingsStore(ABC):

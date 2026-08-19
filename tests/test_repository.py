@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from guitar_helper.db.interfaces import Preset, Segment
+from guitar_helper.db.schema import default_preset_map
 from tests.conftest import make_segment
 
 # =========================================================================
@@ -49,6 +50,41 @@ def test_save_preset_upsert_updates_existing(store):
     by_label = {p.tone_label: p for p in presets}
     assert by_label["clean"].pc_number == 99
     assert by_label["clean"].preset_name == "Clean Lead"
+
+
+# ISSUE-006 — user_modified flag + reset to defaults
+# =========================================================================
+
+def test_save_preset_sets_user_modified_flag(store, db):
+    store.save_preset(Preset(tone_label="clean", preset_name="Clean", pc_number=7))
+    rows = dict(db.execute("SELECT tone_label, user_modified FROM presets").fetchall())
+    assert rows["clean"] == 1
+    assert all(flag == 0 for tone, flag in rows.items() if tone != "clean")
+
+
+def test_save_preset_name_only_edit_also_sets_the_flag(store, db):
+    store.save_preset(Preset(tone_label="metal", preset_name="Rectifier", pc_number=4))
+    flag = db.execute(
+        "SELECT user_modified FROM presets WHERE tone_label = 'metal'"
+    ).fetchone()[0]
+    assert flag == 1
+
+
+def test_reset_presets_to_defaults_restores_pcs_and_clears_flags(store, db):
+    store.save_preset(Preset(tone_label="clean", preset_name="Clean", pc_number=99))
+    store.save_preset(Preset(tone_label="metal", preset_name="Rectifier", pc_number=50))
+
+    store.reset_presets_to_defaults()
+
+    presets = {p.tone_label: p.pc_number for p in store.get_presets()}
+    assert presets == default_preset_map()
+    flags = {r[0] for r in db.execute("SELECT user_modified FROM presets").fetchall()}
+    assert flags == {0}
+    dupes = db.execute(
+        "SELECT pc_number FROM presets WHERE pc_number >= 0 "
+        "GROUP BY pc_number HAVING COUNT(*) > 1"
+    ).fetchall()
+    assert dupes == []
 
 
 # =========================================================================
@@ -269,6 +305,96 @@ def test_ensure_calibration_copy_idempotent_preserves_first_snapshot(store, trac
 def test_ensure_calibration_copy_no_segments_is_noop(store, track_hash):
     store.ensure_calibration_copy(track_hash)
     assert store.get_calibration_segments(track_hash) == []
+
+
+# =========================================================================
+# B1 — atomic writes (mvp-readiness-review §B1)
+# =========================================================================
+
+# Test 10
+def test_save_segments_rolls_back_on_error(store, track_hash):
+    store.save_segments(
+        track_hash,
+        [make_segment(track_hash, 0, 1000, tone_label="metal", manually_corrected=True)],
+    )
+    good = make_segment(track_hash, 1000, 2000, tone_label="clean")
+    bad = make_segment(track_hash, 2000, 3000, tone_label="bogus")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_segments(track_hash, [good, bad])
+
+    remaining = store.get_segments(track_hash)
+    assert len(remaining) == 1
+    assert remaining[0].tone_label == "metal"
+    assert remaining[0].manually_corrected is True
+
+    # The pre-fix bug only became visible at the *next* commit — prove it stays fixed.
+    store.set_setting("unrelated", "write")
+    remaining_again = store.get_segments(track_hash)
+    assert len(remaining_again) == 1
+    assert remaining_again[0].manually_corrected is True
+
+
+# Test 11
+def test_apply_edits_rolls_back_the_whole_session(store, track_hash):
+    store.save_segments(
+        track_hash,
+        [
+            make_segment(track_hash, 0, 1000, tone_label="clean"),
+            make_segment(track_hash, 1000, 2000, tone_label="metal"),
+            make_segment(track_hash, 2000, 3000, tone_label="crunch"),
+        ],
+    )
+    keep, victim, deleted = store.get_segments(track_hash)
+    good_update = Segment(
+        id=keep.id, file_hash=track_hash, start_ms=0, end_ms=900,
+        tone_label="clean", confidence=0.9, manually_corrected=True,
+    )
+    bad_update = Segment(
+        id=victim.id, file_hash=track_hash, start_ms=1000, end_ms=2000,
+        tone_label="bogus", confidence=0.9, manually_corrected=True,
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.apply_edits(track_hash, [good_update, bad_update], [deleted.id])
+
+    remaining = store.get_segments(track_hash)
+    assert [s.tone_label for s in remaining] == ["clean", "metal", "crunch"]
+    assert remaining[0].end_ms == 1000  # good_update did not survive either
+    assert store.get_calibration_segments(track_hash) == []  # snapshot rolled back too
+
+
+# Test 12
+def test_apply_edits_happy_path_writes_and_snapshots_once(store, track_hash):
+    store.save_segments(
+        track_hash,
+        [
+            make_segment(track_hash, 0, 1000, tone_label="clean"),
+            make_segment(track_hash, 1000, 2000, tone_label="metal"),
+        ],
+    )
+    keep, drop = store.get_segments(track_hash)
+    updated = Segment(
+        id=keep.id, file_hash=track_hash, start_ms=0, end_ms=1000,
+        tone_label="crunch", confidence=1.0, manually_corrected=True,
+    )
+
+    store.apply_edits(track_hash, [updated], [drop.id])
+
+    remaining = store.get_segments(track_hash)
+    assert len(remaining) == 1
+    assert remaining[0].tone_label == "crunch"
+    snapshot = store.get_calibration_segments(track_hash)
+    assert [s.tone_label for s in snapshot] == ["clean", "metal"]
+
+    # a second apply_edits must not overwrite the first snapshot
+    updated_again = Segment(
+        id=updated.id, file_hash=track_hash, start_ms=0, end_ms=1000,
+        tone_label="overdrive", confidence=1.0, manually_corrected=True,
+    )
+    store.apply_edits(track_hash, [updated_again], [])
+    snapshot_after_second_call = store.get_calibration_segments(track_hash)
+    assert [s.tone_label for s in snapshot_after_second_call] == ["clean", "metal"]
 
 
 # =========================================================================

@@ -18,6 +18,8 @@ the live dispatcher's preset map, and the persisted offset.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -33,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from guitar_helper.db.interfaces import Preset
+from guitar_helper.db.schema import default_preset_map
 from guitar_helper.playback.dispatch_log import MAX_EVENTS, SEND, DispatchEvent
 from guitar_helper.playback.midi_dispatcher import DEFAULT_LOOKAHEAD_MS
 from guitar_helper.ui import theme
@@ -78,6 +82,23 @@ def format_event(event: DispatchEvent) -> str:
     return f"{format_position(event.position_ms):>9}  {kind:<9} {detail}"
 
 
+def preset_divergences(
+    presets: Sequence[Preset], defaults: Mapping[str, int]
+) -> list[tuple[str, int, int]]:
+    """(tone, live_pc, default_pc) for every default tone whose PC has drifted."""
+    return [
+        (p.tone_label, p.pc_number, defaults[p.tone_label])
+        for p in presets
+        if p.tone_label in defaults and p.pc_number != defaults[p.tone_label]
+    ]
+
+
+def format_divergence_banner(divergences: Sequence[tuple[str, int, int]]) -> str:
+    """One line naming the diverging tones and both PC values."""
+    parts = [f"{tone} is PC {live} (default {default})" for tone, live, default in divergences]
+    return "Preset map has drifted from the defaults: " + "; ".join(parts)
+
+
 class OutputMode(QWidget):
     presetsChanged = Signal()          # a preset row was written; refresh the dispatcher
     testSendRequested = Signal(int)    # pc_number, straight to the MIDI port
@@ -102,12 +123,19 @@ class OutputMode(QWidget):
             "Send this row's Program Change now — verifies loopMIDI, the host and "
             "the plugin without playing a track."
         )
+        self.divergence_banner = QLabel()
+        self.divergence_banner.setWordWrap(True)
+        self.divergence_banner.setVisible(False)
+        self.reset_presets_button = QPushButton("Reset to defaults")
+        self.reset_presets_button.setVisible(False)
 
         preset_box = QGroupBox("Tone → Program Change")
         preset_layout = QVBoxLayout(preset_box)
+        preset_layout.addWidget(self.divergence_banner)
         preset_layout.addWidget(self.preset_table, stretch=1)
         preset_buttons = QHBoxLayout()
         preset_buttons.addWidget(self.test_send_button)
+        preset_buttons.addWidget(self.reset_presets_button)
         preset_buttons.addStretch(1)
         preset_layout.addLayout(preset_buttons)
 
@@ -159,6 +187,7 @@ class OutputMode(QWidget):
         self.preset_model.editRejected.connect(self.statusMessage)
         self.preset_table.selectionModel().selectionChanged.connect(self._on_preset_selection)
         self.test_send_button.clicked.connect(self._on_test_send)
+        self.reset_presets_button.clicked.connect(self._on_reset_presets)
         self.apply_offset_button.clicked.connect(self._on_apply_offset)
         self.revert_offset_button.clicked.connect(self._on_revert_offset)
         self.clear_log_button.clicked.connect(self.log_list.clear)
@@ -173,6 +202,16 @@ class OutputMode(QWidget):
     def refresh_presets(self) -> None:
         self.preset_model.set_presets(self._store.get_presets())
         self._on_preset_selection()
+        diverged = preset_divergences(self.preset_model.presets, default_preset_map())
+        self.divergence_banner.setText(format_divergence_banner(diverged))
+        self.divergence_banner.setVisible(bool(diverged))
+        self.reset_presets_button.setVisible(bool(diverged))
+
+    def _on_reset_presets(self) -> None:
+        self._store.reset_presets_to_defaults()
+        self.refresh_presets()
+        self.presetsChanged.emit()
+        self.statusMessage.emit("Preset map reset to defaults.")
 
     def _selected_preset(self):
         rows = self.preset_table.selectionModel().selectedRows()

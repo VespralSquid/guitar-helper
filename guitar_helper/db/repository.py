@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from .interfaces import IAppStore, IPlaylistStore, Playlist, Preset, Segment, Track
-from .schema import utcnow
+from .schema import reconcile_presets, utcnow
 
 _TRACK_SELECT = """
     SELECT t.file_hash, t.filename, t.title, t.artist, t.duration_ms,
@@ -12,6 +12,24 @@ _TRACK_SELECT = """
            COUNT(s.id) AS total
     FROM tracks t
     LEFT JOIN segments s ON s.file_hash = t.file_hash
+"""
+
+_UPDATE_SEGMENT_SQL = """
+    UPDATE segments
+    SET start_ms = ?, end_ms = ?, tone_label = ?,
+        confidence = ?, manually_corrected = ?
+    WHERE id = ?
+"""
+
+_DELETE_SEGMENT_SQL = "DELETE FROM segments WHERE id = ?"
+
+_CALIBRATION_COPY_SQL = """
+    INSERT INTO segments_calibration
+        (file_hash, start_ms, end_ms, tone_label, confidence, manually_corrected)
+    SELECT file_hash, start_ms, end_ms, tone_label, confidence, manually_corrected
+    FROM segments
+    WHERE file_hash = ?
+      AND NOT EXISTS (SELECT 1 FROM segments_calibration WHERE file_hash = ?)
 """
 
 
@@ -41,29 +59,44 @@ class SQLiteSegmentStore(IAppStore, IPlaylistStore):
         return _row_to_segment(row) if row else None
 
     def save_segments(self, file_hash: str, segments: list[Segment]) -> None:
-        self._conn.execute(
-            "DELETE FROM segments WHERE file_hash = ?", (file_hash,)
-        )
-        self._conn.executemany(
-            """
-            INSERT INTO segments
-                (file_hash, start_ms, end_ms, tone_label,
-                 confidence, manually_corrected)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    file_hash,
-                    s.start_ms,
-                    s.end_ms,
-                    s.tone_label,
-                    s.confidence,
-                    int(s.manually_corrected),
-                )
-                for s in segments
-            ],
-        )
-        self._conn.commit()
+        with self._conn:  # rolls back the DELETE if any row fails
+            self._conn.execute(
+                "DELETE FROM segments WHERE file_hash = ?", (file_hash,)
+            )
+            self._conn.executemany(
+                """
+                INSERT INTO segments
+                    (file_hash, start_ms, end_ms, tone_label,
+                     confidence, manually_corrected)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        file_hash,
+                        s.start_ms,
+                        s.end_ms,
+                        s.tone_label,
+                        s.confidence,
+                        int(s.manually_corrected),
+                    )
+                    for s in segments
+                ],
+            )
+
+    def apply_edits(
+        self, file_hash: str, updated: list[Segment], deleted_ids: list[int]
+    ) -> None:
+        with self._conn:
+            self._conn.execute(_CALIBRATION_COPY_SQL, (file_hash, file_hash))
+            self._conn.executemany(
+                _UPDATE_SEGMENT_SQL,
+                [
+                    (s.start_ms, s.end_ms, s.tone_label, s.confidence,
+                     int(s.manually_corrected), s.id)
+                    for s in updated
+                ],
+            )
+            self._conn.executemany(_DELETE_SEGMENT_SQL, [(i,) for i in deleted_ids])
 
     def update_segment(self, segment: Segment) -> None:
         self._conn.execute(
@@ -145,15 +178,21 @@ class SQLiteSegmentStore(IAppStore, IPlaylistStore):
     def save_preset(self, preset: Preset) -> None:
         self._conn.execute(
             """
-            INSERT INTO presets(tone_label, preset_name, pc_number)
-            VALUES (?, ?, ?)
+            INSERT INTO presets(tone_label, preset_name, pc_number, user_modified)
+            VALUES (?, ?, ?, 1)
             ON CONFLICT(tone_label) DO UPDATE
-                SET preset_name = excluded.preset_name,
-                    pc_number   = excluded.pc_number
+                SET preset_name   = excluded.preset_name,
+                    pc_number     = excluded.pc_number,
+                    user_modified = 1
             """,
             (preset.tone_label, preset.preset_name, preset.pc_number),
         )
         self._conn.commit()
+
+    def reset_presets_to_defaults(self) -> None:
+        with self._conn:
+            self._conn.execute("UPDATE presets SET user_modified = 0")
+            reconcile_presets(self._conn)
 
     def save_track(
         self,
