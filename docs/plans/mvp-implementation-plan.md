@@ -318,6 +318,7 @@ is a hypothesis, not a cause.
 | `ARCHITECTURE.md` as-built map | **Done** |
 | User guide for the three modes + a Help entry point | Outstanding |
 | Final `SAVE_STATE.md` pass | Outstanding |
+| Coding conventions in the README / contributor section — the comment rule (no comments unless the WHY is non-obvious), parameterized SQL only, presets as the single source of truth, the audio-callback and SQLite-ownership contracts. Currently they live only in `CLAUDE.md`, which a human contributor has no reason to read | Outstanding |
 
 ---
 
