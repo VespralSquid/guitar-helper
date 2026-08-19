@@ -41,7 +41,7 @@ A targeted RMS analysis was run across all guitar stems. For each segment, the m
 
 ### 4 — Reanalysis (Domain Mismatch Discovered)
 
-The first reanalysis pass was run with `--no-separate`, which routes audio through `NullSeparator` and loads the full mix for feature extraction. This was incorrect: the archetypes were derived from guitar stem features, so comparing full-mix features against stem-derived archetypes introduced a systematic domain mismatch. The mismatch produced plausible-looking but incorrect results — notably, `metal` appearing in Black Dog (a classic rock song with no metal guitar).
+The first reanalysis pass was run with `--no-separate`, which routes audio through `NullSeparator` and loads the full mix for feature extraction. This was incorrect: the archetypes were derived from guitar stem features, so comparing full-mix features against stem-derived archetypes introduced a systematic domain mismatch. The mismatch produced plausible-looking but incorrect results — notably, `metal` appearing in Black Dog, a song featuring multiple clean/edge of breakup sections.
 
 The reanalysis was re-run without `--no-separate`, routing through the cached guitar stems as intended.
 
