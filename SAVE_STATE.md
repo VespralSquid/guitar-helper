@@ -1,7 +1,7 @@
 # Save State — Guitar Helper
-_Last updated: 2026-08-19_
+_Last updated: 2026-08-25_
 
-Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul-plan.md` roadmap is complete. 549 tests passing, committed tree ruff-clean. **Gates 1-4, 6 complete; Gate 5 (packaging) only gate left, plus live rig verification**.
+Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE.** **Gates 1-6 complete** — Gate 5 (packaging) landed 2026-08-25. 631 tests passing, ruff-clean. Remaining before public release: ffmpeg bundling decision, live rig verification.
 
 ## READ FIRST
 - **`docs/plans/mvp-implementation-plan.md`** — master execution plan: 6 gates, ordering rationale, how each is accomplished. Everything below is context for it.
@@ -9,8 +9,39 @@ Status: **Phases 1-3 DONE. Phase 4 M0-M3 + O1-O4 DONE** — the `phase4-overhaul
 - `docs/Report/Guitar_Performance_Assistant_Report_v0.4.md` — as-built architecture. **v0.3 is superseded** and describes components never built (IRenderer/SpectrumAnalyzer/LyricsParser).
 - `docs/architecture/ARCHITECTURE.md` — component map, 17 numbered design decisions (D1-D17), threading contract.
 
+## Gate 5 (Packaging) — RESOLVED 2026-08-25
+Spec + as-built record: **`docs/new feature specs/Packaging_and_Update_Strategy.md`** (§11 is the as-built section — read it before touching the build).
+- PyInstaller **onedir** (not onefile), Inno Setup **per-user** install, `installer/` dir (NOT `packaging/` — shadows the PyPI package on sys.path).
+- **Separation tier IS bundled (reversed 2026-08-26).** 847 MB frozen tree -> **247 MB installer**, 852 MB installed. Build ~15 min, installer compile ~6 min.
+- `AppConfig.resolve()` gained a frozen branch: default root is `%LOCALAPPDATA%\GuitarHelper` when `sys.frozen`, CWD otherwise. `resource_path()` is separate and NOT reachable via `--root`.
+- Updater: `guitar_helper/update/` (Qt-free) + `ui/update_worker.py` + `ui/dialogs/update_prompt.py`. HTTPS-only, SHA-256 verified before launch, Inno `/SILENT` handoff.
+- `installer/release.ps1` builds installer + `manifest.json` together; digest always computed from the artefact, never hand-written.
+- **Separation was NOT bundled originally; that decision was reversed 2026-08-26.** Separation is the product, not an add-on: build_pipeline always uses AudioSeparator and archetypes.json is calibrated on stem features, so a build without it analyses nothing. The ~2 GB that justified excluding it is a CUDA torch install; the CPU build is 498 MB.
+- **ffmpeg NOT bundled - it is a user prerequisite.** The local msys2 build is GPL (--enable-gpl --enable-libx264) and dynamically linked. Installer's consent page documents it and reports live PATH state.
+- **`check_ffmpeg()` is now BLOCK, not WARN.** audio_separator's `Separator.__init__` calls `check_ffmpeg_installed()`, which RAISES when absent - so the separator cannot be constructed and NOTHING can be analysed, .wav included. Reverses the old "ffmpeg is a WARN that becomes a per-file rejection" rule.
+- **diffq stub vendored** at `installer/stubs/diffq.py` (on the spec's pathex). It previously lived only in the dev venv, so a fresh checkout could not build a working app.
+- **Model weights are a build-time hard requirement.** Spec raises SystemExit if absent rather than shipping a bundle that imports fine and cannot separate. `GUITAR_HELPER_MODEL_DIR` overrides the default source dir (C:/tmp/audio-separator-models).
+- `default_model_dir()` in source_separator.py is the single resolution point, shared with `environment.check_model_weights()`; frozen -> `resource_path("models")`.
+
+### Packaging facts that cost time — do not rediscover
+- **`--selftest` exists and must be run against every build** (`GuitarHelper.exe --selftest`). A frozen build that merely *launches* proves nothing: librosa/numba/sklearn aren't touched until first analysis. It forces every deferred import AND a real `FeatureExtractor.extract` (numba JIT-compiles on first CALL, not import).
+- **Frozen windowed build has `sys.stdout is None`.** Anything that prints (audio-separator's tqdm/logging) raises `AttributeError` on `None.write`. `installer/launcher.py` redirects both streams to `%LOCALAPPDATA%\GuitarHelper\guitar-helper.log` before importing anything. **Read that log when a build misbehaves — there is no console.**
+- **numba writes its JIT cache next to the compiled module** = read-only install dir. `installer/runtime_hook.py` sets `NUMBA_CACHE_DIR` before librosa imports.
+- **`.ps1` files must be pure ASCII.** PowerShell 5.1 reads them as ANSI without a BOM; an em dash in a comment is a parse error.
+- **Never pipe PyInstaller through `2>&1` in PS 5.1** — it logs to stderr, and redirecting wraps each line in an ErrorRecord and reports failure on a successful build.
+- **winget installs Inno Setup per-user** at `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`, not Program Files.
+- **Do NOT verify a bundle by listing `_internal/`.** Pure-Python packages (requests, mutagen)
+  live inside the PYZ archive embedded in the exe, not as loose directories, so `ls _internal/`
+  shows them as "missing" when they are present. Only packages with binaries or data files
+  (certifi, charset_normalizer, soundfile) appear there. **`--selftest` is the only valid check.**
+- **`torch.distributed` and `torch.testing` CANNOT be excluded** - torch/__init__.py imports both unconditionally. Excluding them to save space breaks `import torch` and takes audio_separator with it; the app still launches and fails only on the first song. Caught by --selftest. `torch._inductor`, `torch._dynamo`, `torch.utils.tensorboard`, `torch.utils.benchmark`, `torch.include` ARE safe (verified via sys.modules after a bare `import torch`).
+- **An Inno `[Code]` line may not start with `#`** - ISPP reads it as a preprocessor directive. A bare `#13#10 +` continuation is a compile error; prefix it `'' + #13#10 +`.
+- `.gitignore` has `*.spec`; `!installer/GuitarHelper.spec` overrides it.
+
 ## MVP blockers (remaining)
-- **Gate 5 — Packaging.** `pyproject.toml` (fully pinned), PyInstaller spec, app data in `%LOCALAPPDATA%`, bundle archetypes.json, htdemucs_6s, torch+onnxruntime. Clean-machine test + README.
+- **ffmpeg is a user prerequisite (decided 2026-08-26, not a blocker any more).** Installer documents it; preflight blocks with the winget command. Revisit by shipping a static LGPL ffmpeg if it proves a support burden.
+- **Unsigned installer** — SmartScreen warns on first run. Cost/reputation decision, deferred.
+- Update flow never exercised against a real GitHub release; unit-tested with a faked transport only.
 
 ## Gate 3 (ISSUE-007) — RESOLVED
 GUI ingestion path built end-to-end: `AnalysisWorker` (QThread), progress dialogs, Home "Add songs…" button + playlist right-click, File menu entry. `delete_track` on `ITrackEditor` role (mixed into `IAppStore`, not `ISegmentStore`); Home right-click "Remove from library" warns with corrected-segment count, caches stem (D5).
@@ -19,12 +50,13 @@ GUI ingestion path built end-to-end: `AnalysisWorker` (QThread), progress dialog
 **H1:** NullMidiPort fallback + persistent "MIDI disabled" banner (no loopMIDI required). **H2:** `attach()` failures caught broadly, previous track keeps playing. **H3:** correction CLI saves via atomic `apply_edits` (snapshots first). **H5:** playlist creation catches `sqlite3.IntegrityError` only.
 
 ## Gate 6 — RESOLVED
-README.md, LICENSE (MIT / Aryan Kumar / 2026 — **unconfirmed**, needs deliberate decision before Gate 5 redistributes weights), user-guide.md, Help menu entry.
+README.md, LICENSE (MIT / Aryan Kumar / 2026 - **unconfirmed**), user-guide.md, Help menu entry. **The weights ARE now redistributed** (bundled since 2026-08-26), so the htdemucs_6s licence is no longer hypothetical - check it before any public release. Demucs upstream is MIT, but that has not been verified against the specific htdemucs_6s checkpoint shipped here.
 
 ## Resolved (ISSUE-006/008, B1, schema v10)
 - **B1 — `save_segments` not transactional.** RESOLVED: wrapped in transaction; `EditorState.save()` uses atomic `apply_edits()`.
 - **ISSUE-006** — preset-map divergence. RESOLVED: option A — `presets.user_modified` column, v10 migration reconciles non-user-modified rows, partial UNIQUE index. Live DB migrated intact.
 - **ISSUE-008** — stem-cache poisoning. RESOLVED: atomic publish + completion manifest + validation on hit; sampled digest mandatory.
+- **Schema downgrade hole** (found during Gate 5). `_apply_migrations` used `range(current+1, _CURRENT+1)`, which is EMPTY when the DB is ahead of the code — an older build silently opened a newer DB. Now `SchemaTooNewError`, raised BEFORE `executescript`, so a too-new DB is left byte-identical. Also: `init_db` now auto-backs-up to `library.db.bak-v{from}-to-v{to}-{stamp}` before any migration (sqlite backup API, WAL-safe), keeping the last 5. Pruning matches only that name pattern, so hand-made `.bak-*` snapshots survive.
 
 ## Facts NOT derivable from code
 - **D3 open / needs live rig test.** "Pause playback while analysing" ships defaulted OFF; by-ear test decides the default. Do not settle from code — ISSUE-005 lesson.
@@ -40,7 +72,7 @@ README.md, LICENSE (MIT / Aryan Kumar / 2026 — **unconfirmed**, needs delibera
 
 ## Two models — do not conflate
 - `archetypes.json` = **3 KB**, 5 tones x 24 floats, OURS, adapts via `run_calibrate`, ships in git.
-- `htdemucs_6s` = **52 MB** third-party pretrained SEPARATION net, fixed, never calibrated, NOT in the repo. Currently downloaded to `C:/tmp/audio-separator-models/` — a temp dir, unsafe.
+- `htdemucs_6s` = **52 MB** third-party pretrained SEPARATION net, fixed, never calibrated, NOT in the repo. Build sources it from `C:/tmp/audio-separator-models/` (override: `GUITAR_HELPER_MODEL_DIR`) and BUNDLES it; the frozen app reads it from `_internal/models`. The `C:/tmp` original is still an unsafe location for the source copy.
 - `archetypes.json` is useless without htdemucs running first (it is calibrated on stem features). The "~2 GB" figure is torch+onnxruntime (the code that runs the net), not the weights.
 
 ## CRITICAL incident — calibration labels lost & protected
@@ -74,7 +106,8 @@ README.md, LICENSE (MIT / Aryan Kumar / 2026 — **unconfirmed**, needs delibera
 ## Environment
 - Python 3.14.3, Windows 11; venv `.venv/`. ffmpeg 8.0.1 installed. Primary target format: iTunes .m4a.
 - `audio-separator` 0.44.2 (htdemucs_6s), separate heavy install — see `requirements-separation.txt` for the py3.14 `--no-deps` + `diffq` stub procedure.
-- `python-rtmidi`: no cp314 wheel -> meson source build; runtime-only, not in CI. **The frozen build must not need to compile it.**
+- `python-rtmidi`: no cp314 wheel -> meson source build; runtime-only, not in CI. **Resolved by freezing** — the bundle ships the compiled `.pyd`, so end users need no MSVC.
+- Build toolchain: `requirements-packaging.txt` (pyinstaller) + `winget install --id JRSoftware.InnoSetup -e`.
 - `ruff.toml` target-version=py312 (py314 bump deferred). CI: windows-latest, py3.14, ruff + pytest.
 - **The repo is inside OneDrive.** `stems/` (400 MB) syncs pointlessly, and Files On-Demand can dehydrate a stem so it `exists()` with the right size but needs a network fetch. Move the dev stems dir out. Volume is 95% full (54 GB free).
 - Measured: analysis of a 189s track = 10.7s with the stem cached; separation itself is minutes and dominates. The `_stack_raw` duplication is 0.77s of that (7%) — NOT the "~2x" an earlier draft claimed.

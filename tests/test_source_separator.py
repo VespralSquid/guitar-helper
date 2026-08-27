@@ -786,3 +786,32 @@ def test_separate_guitar_signature_frozen():
     sig = inspect.signature(AudioSeparator.separate_guitar)
     params = list(sig.parameters)
     assert params == ["self", "path", "file_hash"]
+
+
+# --- bundled model resolution (packaging) ------------------------------------
+
+
+def test_default_model_dir_uses_the_tmp_default_from_a_checkout(monkeypatch):
+    import guitar_helper.analysis.source_separator as sep
+
+    monkeypatch.setattr(sep, "is_frozen", lambda: False)
+    assert str(sep.default_model_dir()) == str(Path(sep._DEFAULT_MODEL_DIR))
+
+
+def test_default_model_dir_uses_the_bundle_when_frozen(monkeypatch, tmp_path):
+    import guitar_helper.analysis.source_separator as sep
+
+    monkeypatch.setattr(sep, "is_frozen", lambda: True)
+    monkeypatch.setattr(sep, "resource_path", lambda name: tmp_path / name)
+    # /tmp is both wrong on Windows and a directory cleanup tools delete, so a
+    # frozen build must never fall back to it.
+    assert sep.default_model_dir() == tmp_path / "models"
+
+
+def test_explicit_model_dir_still_beats_the_frozen_default(monkeypatch, tmp_path):
+    import guitar_helper.analysis.source_separator as sep
+
+    monkeypatch.setattr(sep, "is_frozen", lambda: True)
+    monkeypatch.setattr(sep, "resource_path", lambda name: tmp_path / "bundle" / name)
+    separator = sep.AudioSeparator(cache_dir=str(tmp_path / "stems"), model_dir=str(tmp_path / "mine"))
+    assert separator._resolve_model_dir() == tmp_path / "mine"

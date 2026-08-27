@@ -5,12 +5,16 @@ import tempfile
 import pytest
 
 from guitar_helper.db.schema import (
+    _BACKUP_RETENTION,
     _CURRENT_VERSION,
     _DEFAULT_PRESETS,
+    SchemaTooNewError,
+    _apply_migrations,
     _migrate_v9_to_v10,
     default_preset_map,
     init_db,
     reconcile_presets,
+    utcnow,
 )
 
 
@@ -681,3 +685,123 @@ def test_reconcile_presets_importable_from_schema_module():
     # db/repository.py imports this by name (D6) — a regression guard against
     # an accidental leading-underscore rename.
     assert callable(reconcile_presets)
+
+
+# --- downgrade guard and pre-migration backup --------------------------------
+
+
+def _seed_db_at_version(path: str, version: int) -> None:
+    """Write a minimal database claiming an arbitrary schema version."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO schema_version(version, applied_at) VALUES (?, ?)",
+            (version, utcnow()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_init_db_rejects_a_newer_schema(tmp_path):
+    path = tmp_path / "future.db"
+    _seed_db_at_version(str(path), _CURRENT_VERSION + 1)
+
+    with pytest.raises(SchemaTooNewError) as excinfo:
+        init_db(str(path))
+
+    assert excinfo.value.found == _CURRENT_VERSION + 1
+    assert excinfo.value.supported == _CURRENT_VERSION
+
+
+def test_rejected_newer_schema_is_left_untouched(tmp_path):
+    path = tmp_path / "future.db"
+    _seed_db_at_version(str(path), _CURRENT_VERSION + 1)
+    before = path.read_bytes()
+
+    with pytest.raises(SchemaTooNewError):
+        init_db(str(path))
+
+    # No DDL ran, so none of this build's tables were created on a database it
+    # does not understand.
+    assert path.read_bytes() == before
+    conn = sqlite3.connect(str(path))
+    try:
+        assert _table_names(conn) == {"schema_version"}
+    finally:
+        conn.close()
+
+
+def test_apply_migrations_guards_against_downgrade():
+    # range() is empty when current > target, so the guard has to be explicit.
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(SchemaTooNewError):
+            _apply_migrations(conn, _CURRENT_VERSION + 3)
+    finally:
+        conn.close()
+
+
+def test_current_version_db_opens_without_a_backup(tmp_path):
+    path = tmp_path / "library.db"
+    init_db(str(path)).close()
+    init_db(str(path)).close()
+    assert list(tmp_path.glob("*.bak-v*")) == []
+
+
+def test_migration_writes_a_backup(tmp_path):
+    path = tmp_path / "library.db"
+    _seed_db_at_version(str(path), 9)
+
+    conn = init_db(str(path))
+    try:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == _CURRENT_VERSION
+    finally:
+        conn.close()
+
+    backups = list(tmp_path.glob("library.db.bak-v9-to-v10-*"))
+    assert len(backups) == 1
+    # The snapshot must be the pre-migration state, not a copy of the result.
+    snapshot = sqlite3.connect(str(backups[0]))
+    try:
+        assert snapshot.execute("SELECT version FROM schema_version").fetchone()[0] == 9
+    finally:
+        snapshot.close()
+
+
+def test_backups_are_pruned_to_the_retention_limit(tmp_path):
+    path = tmp_path / "library.db"
+    for i in range(_BACKUP_RETENTION + 3):
+        stale = tmp_path / f"library.db.bak-v9-to-v10-20260101-0000{i:02d}"
+        stale.write_bytes(b"")
+    _seed_db_at_version(str(path), 9)
+
+    init_db(str(path)).close()
+
+    assert len(list(tmp_path.glob("library.db.bak-v*"))) == _BACKUP_RETENTION
+
+
+def test_pruning_leaves_hand_made_backups_alone(tmp_path):
+    path = tmp_path / "library.db"
+    manual = tmp_path / "library.db.bak-precal-20260624-153521"
+    manual.write_bytes(b"")
+    for i in range(_BACKUP_RETENTION + 2):
+        (tmp_path / f"library.db.bak-v9-to-v10-20260101-0000{i:02d}").write_bytes(b"")
+    _seed_db_at_version(str(path), 9)
+
+    init_db(str(path)).close()
+
+    assert manual.exists()
+
+
+def test_in_memory_db_needs_no_backup_path():
+    # _is_file_db must short-circuit; sqlite3 would otherwise be handed a
+    # nonsense ":memory:.bak-..." destination.
+    conn = init_db(":memory:")
+    try:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == _CURRENT_VERSION
+    finally:
+        conn.close()

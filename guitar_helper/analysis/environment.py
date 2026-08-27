@@ -9,12 +9,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from .audio_loader import _SUPPORTED_NATIVE, _SUPPORTED_PYDUB
+from .source_separator import default_model_dir
 
 SUPPORTED_SUFFIXES: frozenset[str] = frozenset(_SUPPORTED_NATIVE | _SUPPORTED_PYDUB)
 FFMPEG_SUFFIXES: frozenset[str] = frozenset(_SUPPORTED_PYDUB)
 
 _SEPARATION_MODULES = ("audio_separator", "torch", "onnxruntime", "diffq")
-_DEFAULT_MODEL_DIR = Path("/tmp/audio-separator-models")   # mirrors Separator's default
 _MODEL_CONFIG = "htdemucs_6s.yaml"
 _MIN_WEIGHTS_BYTES = 10 * 1024 * 1024
 
@@ -122,7 +122,7 @@ def check_separation_stack(*, deep: bool = False) -> Check:
 
 
 def check_model_weights(model_dir: str | Path | None = None) -> Check:
-    resolved = Path(model_dir) if model_dir is not None else _DEFAULT_MODEL_DIR
+    resolved = Path(model_dir) if model_dir is not None else default_model_dir()
     config = resolved / _MODEL_CONFIG
     has_config = config.is_file()
     has_weights = has_config and any(
@@ -146,18 +146,32 @@ def check_model_weights(model_dir: str | Path | None = None) -> Check:
 
 
 def check_ffmpeg() -> Check:
+    """ffmpeg is a BLOCK, not a WARN.
+
+    This reverses the earlier "ffmpeg is a WARN that becomes a per-file
+    rejection" decision, which was made when a run could avoid separation.
+    It cannot any more: build_pipeline always uses AudioSeparator, and
+    audio_separator's Separator.__init__ calls check_ffmpeg_installed(), which
+    raises FileNotFoundError when ffmpeg is absent. Without ffmpeg the
+    separator cannot be constructed at all, so *no* file can be analysed --
+    including .wav. The per-file `needs_ffmpeg` rejection still applies on top,
+    to explain which files also need it merely to decode.
+    """
     found = shutil.which("ffmpeg")
     if found:
         return Check(
-            name="ffmpeg", ok=True, severity=Severity.WARN,
+            name="ffmpeg", ok=True, severity=Severity.BLOCK,
             detail=f"ffmpeg found at {found}.", remedy="",
         )
     return Check(
         name="ffmpeg",
         ok=False,
-        severity=Severity.WARN,
+        severity=Severity.BLOCK,
         detail="ffmpeg not found on PATH.",
-        remedy="Install ffmpeg to enable .mp3/.m4a/.aac files; native formats still work.",
+        remedy=(
+            "Install ffmpeg and restart: winget install --id Gyan.FFmpeg -e. "
+            "Guitar stem separation cannot run without it, so no song can be analysed."
+        ),
     )
 
 

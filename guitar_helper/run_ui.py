@@ -20,6 +20,8 @@ def main() -> None:
     add_config_args(parser)
     args = parser.parse_args()
     cfg = config_from_args(args)
+    cfg.ensure_dirs()
+    cfg.ensure_user_resources()
     sys.exit(run(cfg, mock=args.mock))
 
 

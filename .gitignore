@@ -20,6 +20,8 @@ dist/
 build/
 *.spec
 *.egg-info/
+# ...but the checked-in PyInstaller spec is source, not a build artefact.
+!installer/GuitarHelper.spec
 
 # PyInstaller
 *.exe

@@ -85,10 +85,14 @@ def test_preflight_clean_environment_one_wav(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# D15 — ffmpeg is a WARN that becomes a per-file rejection
+# ffmpeg is a BLOCK (reverses the earlier "WARN + per-file rejection" rule).
+# build_pipeline always uses AudioSeparator, and Separator.__init__ calls
+# check_ffmpeg_installed(), which raises when ffmpeg is absent — so nothing can
+# be analysed without it, .wav included. The per-file rejection still applies
+# on top, to say which files also need ffmpeg merely to decode.
 # ---------------------------------------------------------------------------
 
-def test_ffmpeg_absent_is_warn_not_block(tmp_path, monkeypatch):
+def test_ffmpeg_absent_blocks_ingestion(tmp_path, monkeypatch):
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(environment.shutil, "which", lambda name: None)
     monkeypatch.setattr(environment, "_is_writable", lambda directory: (True, ""))
@@ -104,12 +108,19 @@ def test_ffmpeg_absent_is_warn_not_block(tmp_path, monkeypatch):
     m4a.write_bytes(b"....")
 
     ffmpeg_check = check_ffmpeg()
-    assert ffmpeg_check.severity is Severity.WARN
+    assert ffmpeg_check.severity is Severity.BLOCK
     assert ffmpeg_check.ok is False
+    assert "winget install" in ffmpeg_check.remedy
 
     report = preflight([wav, m4a], stems_dir=tmp_path / "stems", db_path=tmp_path / "library.db", model_dir=model_dir)
 
-    assert report.can_proceed is True
+    # Even the natively-decodable .wav cannot proceed: separation is mandatory
+    # and the separator will not construct without ffmpeg.
+    assert report.can_proceed is False
+    assert [c.name for c in report.blockers] == ["ffmpeg"]
+
+    # The per-file verdict is unchanged — .wav still decodes, .m4a still needs
+    # ffmpeg to decode. The blocker is about separation, not about decoding.
     file_codes = {f.path.name: f.code for f in report.files}
     assert file_codes["song.wav"] == "ok"
     assert file_codes["song.m4a"] == "needs_ffmpeg"
@@ -159,7 +170,9 @@ def test_model_weights_all_present_passes(tmp_path):
 
 
 def test_model_weights_default_dir_resolved_via_module_constant(tmp_path, monkeypatch):
-    monkeypatch.setattr(environment, "_DEFAULT_MODEL_DIR", tmp_path)
+    # Shared with AudioSeparator._resolve_model_dir so the preflight check and
+    # the separator can never disagree about where the weights live.
+    monkeypatch.setattr(environment, "default_model_dir", lambda: tmp_path)
     (tmp_path / environment._MODEL_CONFIG).write_bytes(b"x" * 21)
     (tmp_path / "weights.th").write_bytes(b"0" * environment._MIN_WEIGHTS_BYTES)
 

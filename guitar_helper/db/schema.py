@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -75,6 +76,8 @@ CREATE TABLE IF NOT EXISTS settings (
 
 _CURRENT_VERSION = 10
 
+_BACKUP_RETENTION = 5
+
 _PARK_OFFSET = 1000
 _NO_DISPATCH_PC = -1
 
@@ -96,11 +99,39 @@ _DEFAULT_PRESETS = [
 # seed row + a re-seed migration to restore it on a free PC.
 
 
+class SchemaTooNewError(RuntimeError):
+    """The database was written by a newer build than this one.
+
+    _apply_migrations only ever walks forward, so without this guard an older
+    build silently opens a newer database and operates on a schema it does not
+    understand. Once there is an update channel users can and do roll back, so
+    this has to fail loudly rather than corrupt the library.
+    """
+
+    def __init__(self, path: str, found: int, supported: int) -> None:
+        self.path = str(path)
+        self.found = found
+        self.supported = supported
+        super().__init__(
+            f"{path} is at schema v{found}, but this build only supports v{supported}. "
+            f"It was written by a newer version of Guitar Helper — upgrade to open it."
+        )
+
+
 def init_db(path: str) -> sqlite3.Connection:
     """Open (or create) the database, apply schema, seed presets."""
     conn = sqlite3.connect(path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
+
+        # Read the version before executescript so a too-new database is
+        # rejected without this build having written a single byte to it.
+        existing = _existing_version(conn)
+        if existing is not None and existing > _CURRENT_VERSION:
+            raise SchemaTooNewError(path, existing, _CURRENT_VERSION)
+        if existing is not None and existing < _CURRENT_VERSION:
+            _backup_before_migration(conn, path, existing)
+
         conn.executescript(_DDL)
 
         row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -123,7 +154,64 @@ def init_db(path: str) -> sqlite3.Connection:
     return conn
 
 
+def _existing_version(conn: sqlite3.Connection) -> int | None:
+    """Schema version of an already-populated database, or None for a database
+    this build has not seen before. Never writes."""
+    present = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'"
+    ).fetchone()
+    if present is None:
+        return None
+    row = conn.execute("SELECT version FROM schema_version").fetchone()
+    return None if row is None else int(row[0])
+
+
+def _backup_before_migration(conn: sqlite3.Connection, path: str, current: int) -> None:
+    """Snapshot the database before a migration rewrites it.
+
+    Uses the sqlite backup API rather than copying the file so a WAL in
+    progress is captured consistently. Best-effort: a database that cannot be
+    backed up (read-only media, no space) must not block the user from opening
+    the app, so failure is swallowed — the migrations themselves are already
+    per-step committed and idempotent.
+    """
+    if not _is_file_db(path):
+        return
+    source = Path(path)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    dest = source.with_name(f"{source.name}.bak-v{current}-to-v{_CURRENT_VERSION}-{stamp}")
+    try:
+        with sqlite3.connect(dest) as backup_conn:
+            conn.backup(backup_conn)
+    except Exception:  # noqa: BLE001 — see docstring
+        return
+    _prune_backups(source)
+
+
+def _is_file_db(path: str) -> bool:
+    text = str(path)
+    if not text or text == ":memory:" or text.startswith("file:"):
+        return False
+    return Path(text).is_file()
+
+
+def _prune_backups(source: Path) -> None:
+    """Keep only the most recent _BACKUP_RETENTION automatic backups.
+
+    Matches only the timestamped names this module writes, so hand-made
+    `.bak-*` snapshots taken during development are never deleted.
+    """
+    backups = sorted(source.parent.glob(f"{source.name}.bak-v*-to-v*-*"))
+    for stale in backups[:-_BACKUP_RETENTION]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
 def _apply_migrations(conn: sqlite3.Connection, current: int) -> None:
+    if current > _CURRENT_VERSION:
+        raise SchemaTooNewError("database", current, _CURRENT_VERSION)
     # Apply every pending step in order so a DB any number of versions behind
     # reaches _CURRENT_VERSION. _MIGRATIONS[v] upgrades a DB at v-1 to v.
     for target in range(current + 1, _CURRENT_VERSION + 1):

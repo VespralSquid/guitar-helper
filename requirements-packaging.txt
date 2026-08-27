@@ -1,0 +1,32 @@
+# Build toolchain for producing the distributable Windows build.
+# Not needed to run or develop the app, and deliberately not in requirements.txt
+# so CI stays light.
+#
+#   pip install -r requirements-packaging.txt
+#   .\installer\release.ps1
+#
+# --- Prerequisites the build needs beyond pip ---
+#
+# 1. The separation stack must be installed in the build venv. It IS bundled into
+#    the installer (see the packaging spec section 7 for why that reversed an
+#    earlier decision), so a venv without it produces an app that cannot analyse
+#    anything. Follow requirements-separation.txt in full, including the
+#    --no-deps step and the diffq stub.
+#
+#    The diffq stub is vendored at installer/stubs/diffq.py and is on the spec's
+#    pathex, so the *build* no longer depends on the stub having been dropped
+#    into the venv by hand. Installing audio-separator still does.
+#
+# 2. htdemucs_6s weights. Not in git (55 MB). The spec fails the build if they
+#    are absent rather than shipping a bundle that cannot separate. Default
+#    location C:\tmp\audio-separator-models, override with:
+#      $env:GUITAR_HELPER_MODEL_DIR = "D:\path\to\models"
+#    Fetch them by running one separation from the CLI with a network connection.
+#
+# 3. Inno Setup, a non-pip dependency:
+#      winget install --id JRSoftware.InnoSetup -e
+#    winget installs it per-user, at %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe.
+#
+# FFmpeg is NOT bundled and is not needed to build - it is an end-user
+# prerequisite that the installer's components page documents.
+pyinstaller

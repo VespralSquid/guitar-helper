@@ -8,7 +8,9 @@ Three tiers: Analysis (offline batch) → Playback + MIDI (runtime) → Presenta
 ## Current status
 - Phases 1–3 complete: DB layer, analysis pipeline, stem separation, calibration, playback engine, MIDI dispatch, CI/CD on GitHub (`VespralSquid/guitar-helper`, private)
 - Phase 4 milestones M0–M3 + O1–O4 complete. Remaining Phase 4 work is the QOL pass (`docs/new feature specs/Phase_4_QOL_changes.md`)
-- **MVP Wave 1 (2026-08-18) complete:** Gates 1–2 partially done. ISSUE-006 (preset reconciliation), ISSUE-008 (stem-cache validation), and B1 (atomic writes) resolved. Schema v10. 459 tests passing. ISSUE-007 groundwork done (Qt-free tier split); GUI analysis and `delete_track` outstanding in Gate 3 Wave 2.
+- **MVP Wave 1 (2026-08-18) complete:** Gates 1–2 partially done. ISSUE-006 (preset reconciliation), ISSUE-008 (stem-cache validation), and B1 (atomic writes) resolved. Schema v10. ISSUE-007 groundwork done (Qt-free tier split).
+- **MVP Wave 2 complete:** Gate 3 GUI ingestion, `delete_track`, Gate 4 robustness, Gate 6 docs.
+- **Gate 5 packaging complete (2026-08-25):** PyInstaller onedir + Inno Setup per-user installer + SHA-256-verified manifest updater. 634 tests passing. Separation bundled 2026-08-26. See `docs/new feature specs/Packaging_and_Update_Strategy.md` §11 (as-built) before touching the build.
 
 ## Multi-Agent Routing
 
@@ -113,10 +115,39 @@ guitar_helper/
     panels/         — queue_sidebar.py
     models/         — qt_adapters.py (QAbstractTableModel adapters)
     theme.py, transport.py, controllers.py, load_worker.py
+  update/           — Qt-free update core: manifest, verified download, installer handoff
   application.py    — composition root; per-track lifecycle (decode/attach)
-  config.py         — one root -> db/library/stems/archetypes paths
+  config.py         — one root -> db/library/stems/archetypes paths; frozen-aware
+                      (`is_frozen`, `user_data_dir`, `resource_path`)
   lyrics/           — EMPTY PACKAGE. LrcParser/LrcLibClient not implemented (deferred)
+installer/          — build system (NOT `packaging/`: that name shadows the PyPI package)
+  launcher.py       — frozen entry point; stream redirect, crash dialog, --selftest
+  runtime_hook.py   — redirects NUMBA_CACHE_DIR before librosa imports
+  GuitarHelper.spec — PyInstaller onedir spec
+  GuitarHelper.iss  — Inno Setup, per-user install + component consent page
+  stubs/diffq.py    — vendored stub; audio-separator's Demucs imports it eagerly
+  build.ps1         — freeze only
+  release.ps1       — freeze -> installer -> manifest.json
 ```
+
+## Packaging rules
+- **`GuitarHelper.exe --selftest` against every build.** A frozen build that launches proves
+  nothing: librosa/numba/sklearn aren't imported until first analysis. It forces the imports
+  AND a real feature extraction (numba JIT-compiles on first *call*).
+- **No console in a frozen build** — `sys.stdout` is None and stream output goes to
+  `%LOCALAPPDATA%\GuitarHelper\guitar-helper.log`. Read it when a build misbehaves.
+- **`.ps1` files must be pure ASCII** (PowerShell 5.1 reads them as ANSI without a BOM).
+- **Never pipe PyInstaller through `2>&1` in PS 5.1** — it logs to stderr, and the redirect
+  reports failure on a successful build.
+- Read-only bundled assets go through `resource_path()`, never `Path(__file__).parents[n]`.
+  Writable user data goes through `AppConfig`. The two must not share a root.
+- **The separation tier IS bundled** (torch CPU + onnxruntime + audio-separator + htdemucs_6s).
+  Reversed 2026-08-26: separation is the product, not an add-on. 847 MB tree -> 247 MB installer.
+- **`torch.distributed` and `torch.testing` cannot be excluded** — `torch/__init__.py` imports
+  both unconditionally, so excluding them breaks `import torch` and audio-separator with it.
+- **ffmpeg is a user prerequisite, not bundled.** `check_ffmpeg()` is a BLOCK: audio-separator's
+  `Separator.__init__` raises without it, so nothing can be analysed at all.
+- An Inno `[Code]` line may not begin with `#` — ISPP reads it as a preprocessor directive.
 
 Full as-built map, design decisions and threading model: `docs/architecture/ARCHITECTURE.md`.
 

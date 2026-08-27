@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import soundfile as sf
 
+from guitar_helper.config import is_frozen, resource_path
+
 _GUITAR_STEM = "Guitar"
 _MODEL = "htdemucs_6s.yaml"
 _CACHE_FORMAT_VERSION = 1
@@ -26,6 +28,20 @@ _STALE_TMP_AGE_S = 6 * 3600
 _MIN_FREE_BYTES = 200 * 1024**2
 _WAV_HEADER_BYTES = 44
 _FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
+
+def default_model_dir() -> Path:
+    """Where htdemucs_6s lives when nothing overrides it.
+
+    A frozen build ships the weights, so it reads them from the bundle rather
+    than the audio-separator default of /tmp — which is both wrong on Windows
+    and, per SAVE_STATE, a directory cleanup tools delete. The install is
+    per-user, so the bundled directory is writable and audio-separator's
+    makedirs/refetch paths still work if a file ever goes missing.
+    """
+    if is_frozen():
+        return resource_path("models")
+    return Path(_DEFAULT_MODEL_DIR)
+
 
 _REQUIRED_MANIFEST_KEYS = (
     "cache_format_version",
@@ -155,7 +171,7 @@ class AudioSeparator(ISourceSeparator):
         env = os.environ.get(_MODEL_DIR_ENV)
         if env:
             return Path(env)
-        return Path(_DEFAULT_MODEL_DIR)
+        return default_model_dir()
 
     def _derive_model_identity(self) -> tuple[str, list[dict] | None]:
         model_dir = self._resolve_model_dir()

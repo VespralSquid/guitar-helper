@@ -24,15 +24,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import guitar_helper
 from guitar_helper.analysis.factory import build_pipeline
 from guitar_helper.analysis.pipeline import ManualCorrectionsExistError
 from guitar_helper.application import Application, NoSegmentsError
+from guitar_helper.config import resource_path
 from guitar_helper.db.interfaces import Track
 from guitar_helper.ui import theme
 from guitar_helper.ui.analysis_worker import AnalysisWorker
 from guitar_helper.ui.controllers import PlaybackController
 from guitar_helper.ui.dialogs.add_songs import AddSongsDialog, AddSongsOptions
 from guitar_helper.ui.dialogs.analysis_progress import AnalysisProgressDialog
+from guitar_helper.ui.dialogs.update_prompt import UpdatePromptDialog
 from guitar_helper.ui.editor.validation import EditResult
 from guitar_helper.ui.load_worker import LoadWorker
 from guitar_helper.ui.modes.analysis import AnalysisMode
@@ -43,6 +46,8 @@ from guitar_helper.ui.state.editor_state import EditorState
 from guitar_helper.ui.state.queue_state import QueueState
 from guitar_helper.ui.state.state_bridge import EditorStateBridge, QueueStateBridge
 from guitar_helper.ui.transport import TransportControls
+from guitar_helper.ui.update_worker import UpdateCheckWorker, UpdateDownloadWorker
+from guitar_helper.update import UpdateError, launch_installer
 
 _POS_TIMER_MS = 50
 _DISPATCH_TIMER_MS = 100
@@ -59,6 +64,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Guitar Helper")
         self._app = application
         self._controller = PlaybackController(application)
+
+        self._update_check: UpdateCheckWorker | None = None
+        self._update_download: UpdateDownloadWorker | None = None
+        self._update_dialog: UpdatePromptDialog | None = None
+        self._verified_installer: str | None = None
 
         tone_labels = tuple(p.tone_label for p in application.store.get_presets())
         self._state = EditorState(application.store, tone_labels)
@@ -141,6 +151,8 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("&Help")
         guide_action = help_menu.addAction("&User guide")
         guide_action.triggered.connect(self._on_open_user_guide)
+        update_action = help_menu.addAction("Check for &updates…")
+        update_action.triggered.connect(lambda: self.check_for_updates(silent=False))
         about_action = help_menu.addAction("&About")
         about_action.triggered.connect(self._on_about)
 
@@ -581,7 +593,10 @@ class MainWindow(QMainWindow):
             )
 
     def _on_open_user_guide(self) -> None:
-        guide = Path(__file__).resolve().parents[2] / "docs" / "user-guide.md"
+        # resource_path, not __file__: in a frozen build this module lives under
+        # _internal and the docs are a bundled data file, not a sibling of the
+        # package.
+        guide = resource_path("docs/user-guide.md")
         if guide.is_file() and QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide))):
             return
         QMessageBox.information(
@@ -592,10 +607,107 @@ class MainWindow(QMainWindow):
     def _on_about(self) -> None:
         QMessageBox.about(
             self, "About Guitar Helper",
-            "Guitar Helper — offline guitar performance assistant.\n\n"
+            f"Guitar Helper {guitar_helper.__version__} — offline guitar performance "
+            "assistant.\n\n"
             "Analyses local audio, segments it by guitar tone, and fires MIDI "
             "Program Changes at tone boundaries during playback.",
         )
+
+    # ------------------------------------------------------------------
+    # updates
+    # ------------------------------------------------------------------
+
+    def check_for_updates(self, *, silent: bool = True) -> None:
+        """Start a manifest check. `silent` suppresses the up-to-date and
+        failure notices, which is what the launch-time check wants."""
+        if self._update_check is not None and self._update_check.isRunning():
+            return
+
+        worker = UpdateCheckWorker(parent=self)
+        self._update_check = worker
+        worker.updateAvailable.connect(self._on_update_available)
+        if not silent:
+            worker.upToDate.connect(
+                lambda: QMessageBox.information(
+                    self, "No update available",
+                    f"Guitar Helper {guitar_helper.__version__} is the latest version.",
+                )
+            )
+            worker.failed.connect(
+                lambda message: QMessageBox.warning(self, "Update check failed", message)
+            )
+        worker.finished.connect(self._on_update_check_finished)
+        worker.start()
+
+    def _on_update_check_finished(self) -> None:
+        # Drop the reference before deleteLater. Keeping it would leave a
+        # wrapper around a deleted C++ object, and the isRunning() guard above
+        # raises RuntimeError on the next check rather than returning False.
+        worker, self._update_check = self._update_check, None
+        if worker is not None:
+            worker.deleteLater()
+
+    def _on_update_available(self, manifest) -> None:
+        dialog = UpdatePromptDialog(manifest, self)
+        self._update_dialog = dialog
+        dialog.downloadRequested.connect(lambda: self._start_update_download(manifest))
+        dialog.cancelRequested.connect(self._cancel_update_download)
+        dialog.installRequested.connect(self._install_update)
+        dialog.finished.connect(lambda _: self._cancel_update_download())
+        dialog.exec()
+        self._update_dialog = None
+
+    def _start_update_download(self, manifest) -> None:
+        worker = UpdateDownloadWorker(manifest, parent=self)
+        self._update_download = worker
+        worker.progress.connect(self._on_update_progress)
+        worker.ready.connect(self._on_update_ready)
+        worker.failed.connect(self._on_update_failed)
+        worker.finished.connect(self._on_update_download_finished)
+        worker.start()
+
+    def _on_update_download_finished(self) -> None:
+        worker, self._update_download = self._update_download, None
+        if worker is not None:
+            worker.deleteLater()
+
+    def _cancel_update_download(self) -> None:
+        worker = self._update_download
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+
+    def _on_update_progress(self, downloaded: int, total: int) -> None:
+        if self._update_dialog is not None:
+            self._update_dialog.set_progress(downloaded, total)
+
+    def _on_update_ready(self, path: str) -> None:
+        self._verified_installer = path
+        if self._update_dialog is not None:
+            self._update_dialog.set_download_finished()
+
+    def _on_update_failed(self, message: str) -> None:
+        self._verified_installer = None
+        if self._update_dialog is not None:
+            self._update_dialog.set_failed(message)
+
+    def _install_update(self) -> None:
+        """Hand off to the installer and quit.
+
+        Only ever launches the path `download_update` returned, which is the
+        one that matched the manifest digest — never a path from the manifest
+        or from the dialog.
+        """
+        installer = self._verified_installer
+        if not installer:
+            return
+        try:
+            launch_installer(installer)
+        except UpdateError as exc:
+            self._on_update_failed(str(exc))
+            return
+        if self._update_dialog is not None:
+            self._update_dialog.accept()
+        QApplication.instance().quit()
 
     def _on_mode_changed(self, row: int) -> None:
         if row == MODE_ANALYSIS:
@@ -699,6 +811,16 @@ class MainWindow(QMainWindow):
             worker.fileDone.disconnect(self._on_analysis_file_done)
             worker.finished.disconnect(self._on_analysis_finished)
             worker.cancel()
+            worker.wait()
+        if self._update_download is not None:
+            # A download aborts cheaply and the partial file is discarded, so
+            # unlike analysis this one does not have to run to completion — but
+            # the thread still has to be joined before its window goes away.
+            worker, self._update_download = self._update_download, None
+            worker.cancel()
+            worker.wait()
+        if self._update_check is not None:
+            worker, self._update_check = self._update_check, None
             worker.wait()
         self._pos_timer.stop()
         self._dispatch_timer.stop()
