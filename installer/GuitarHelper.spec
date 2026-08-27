@@ -82,6 +82,9 @@ datas = [
     # bundled at the same relative location it has in the checkout.
     (str(ROOT / "docs" / "user-guide.md"), "docs"),
     (str(ROOT / "LICENSE"), "."),
+    # MIT/BSD/ISC all require their notices to be preserved in a
+    # redistribution, and this bundle is one.
+    (str(ROOT / "THIRD-PARTY-NOTICES.md"), "."),
 ]
 datas += [(str(_MODEL_DIR / f), "models") for f in _MODEL_FILES]
 

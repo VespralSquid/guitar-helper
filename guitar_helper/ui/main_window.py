@@ -7,6 +7,7 @@ mode signals to the controller/state."""
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -626,6 +627,13 @@ class MainWindow(QMainWindow):
         worker = UpdateCheckWorker(parent=self)
         self._update_check = worker
         worker.updateAvailable.connect(self._on_update_available)
+        # A silent check swallows failures so an offline user is not nagged, but
+        # it must still leave a trace: the release channel is currently a private
+        # repo whose manifest URL 404s anonymously, and without this line an
+        # updater that can never fire looks identical to one that found nothing.
+        worker.failed.connect(
+            lambda message: print(f"[update] check failed: {message}", file=sys.stderr)
+        )
         if not silent:
             worker.upToDate.connect(
                 lambda: QMessageBox.information(
