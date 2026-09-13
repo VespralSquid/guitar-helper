@@ -1,8 +1,11 @@
 # Third-party notices
 
-Guitar Helper is distributed as a frozen bundle containing the components below.
-MIT, BSD and ISC all require their copyright and permission notices to be
-preserved in redistributions, which is what this file is for.
+Guitar Helper itself is licensed **GPL-3.0-or-later** (see LICENSE, and COPYRIGHT
+for the reasoning and for how to obtain the source).
+
+It is distributed as a frozen bundle containing the components below. MIT, BSD
+and ISC all require their copyright and permission notices to be preserved in
+redistributions, which is what this file is for.
 
 Versions are those bundled in the 1.0.0 build.
 
@@ -65,24 +68,28 @@ MIT permission notice, as it applies to Demucs:
 
 ## Note on PySide6 (LGPL v3)
 
+PySide6 is offered as `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`. It is
+taken here under **LGPL-3.0**, which is compatible with the GPL-3.0-or-later
+licence of the combined work. Note there is no LGPL-2.1 option, which is one of
+the reasons GPLv2 was not available for this project.
+
 Qt is used under the LGPL. The build is PyInstaller **onedir**, so the Qt
 libraries remain separate `.dll` files rather than being folded into a single
 executable, which preserves the recipient's ability to replace them with a
 modified Qt. Qt is not modified.
 
-## Note on mutagen (GPL-2.0-or-later)
+## Note on mutagen (GPL-2.0-or-later) — resolved
 
-mutagen is used only to read title/artist tags from audio files
-(`_read_tags` in `ui/analysis_worker.py` and `run_batch.py`).
+mutagen is used only to read title/artist tags (`_read_tags` in
+`ui/analysis_worker.py` and `run_batch.py`).
 
-**GPL-2.0-or-later is copyleft**, and unlike the permissive licences above it
-places conditions on the combined distributed work, not just on mutagen itself.
-Bundling it into this application and distributing that bundle is therefore not
-compatible with offering the whole under MIT without further thought.
+GPL-2.0-or-later is copyleft: unlike the permissive licences above, it places
+conditions on the combined distributed work, not just on mutagen itself. This
+was originally flagged as a conflict with an MIT distribution.
 
-This is unresolved as of 1.0.0. The realistic options are to replace mutagen
-with a permissively licensed tag reader (the usage is small and already
-duplicated across two call sites), or to license the distribution accordingly.
+**Resolved by licensing Guitar Helper under GPL-3.0-or-later**, rather than by
+dropping mutagen. "or-later" is what allows mutagen to be taken under version 3,
+which is the version this project needs for the reasons in COPYRIGHT.
 
 ## Not bundled
 

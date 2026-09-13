@@ -285,8 +285,17 @@ with the evidence.
 
 ## License
 
-MIT — see `LICENSE`.
+**GPL-3.0-or-later** — see `LICENSE` for the full text and `COPYRIGHT` for the
+copyright notice, the reasoning, and how to obtain the source.
 
-Third-party dependencies keep their own licences. The htdemucs_6s separation
-weights come from the Demucs project and are not distributed with this
-repository.
+The version is forced by what the distributed binary bundles, not by preference:
+`mutagen` is GPL-2.0-or-later (copyleft), while `requests` (Apache-2.0) and
+PySide6 (which offers no LGPL-2.1 option) are both incompatible with GPLv2. See
+`THIRD-PARTY-NOTICES.md` for the full component list.
+
+Guitar Helper is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+The htdemucs_6s separation weights come from Meta's Demucs project (MIT) and are
+**not** in this repository, but they *are* included in the installer build.

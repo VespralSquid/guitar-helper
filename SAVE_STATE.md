@@ -50,7 +50,16 @@ GUI ingestion path built end-to-end: `AnalysisWorker` (QThread), progress dialog
 **H1:** NullMidiPort fallback + persistent "MIDI disabled" banner (no loopMIDI required). **H2:** `attach()` failures caught broadly, previous track keeps playing. **H3:** correction CLI saves via atomic `apply_edits` (snapshots first). **H5:** playlist creation catches `sqlite3.IntegrityError` only.
 
 ## Gate 6 — RESOLVED
-README.md, LICENSE (MIT / Aryan Kumar / 2026 - **unconfirmed**), user-guide.md, Help menu entry. **The weights ARE now redistributed** (bundled since 2026-08-26), so the htdemucs_6s licence is no longer hypothetical - check it before any public release. Demucs upstream is MIT, but that has not been verified against the specific htdemucs_6s checkpoint shipped here.
+README.md, user-guide.md, Help menu entry.
+**LICENCE RESOLVED 2026-09-13: the project is GPL-3.0-or-later, not MIT.**
+- Forced by what the binary bundles: mutagen is GPL-2.0-or-later (copyleft). GPLv2 was NOT an option - `requests` is Apache-2.0 (incompatible with v2) and PySide6 offers only LGPL-3.0/GPL-2.0/GPL-3.0, no LGPL-2.1. So v3 is the only version that works.
+- `LICENSE` is the verbatim GPL-3.0 text. `COPYRIGHT` holds the notice, the version reasoning, and the source offer. `THIRD-PARTY-NOTICES.md` lists every bundled component.
+- Installer shows the licence (`LicenseFile`) + `InfoBeforeFile=COPYRIGHT`, and installs all three at the app root AND in `_internal` (About dialog links them via `resource_path`).
+- About dialog carries the GPLv3 5(d) Appropriate Legal Notices (copyright, no warranty, redistribution right, licence link).
+- Update manifest gained `source_url` (HTTPS-validated); the update prompt always states the licence and shows the source link, because an update conveys a binary too.
+- `--selftest` now fails if LICENSE/COPYRIGHT/THIRD-PARTY-NOTICES are missing from a bundle.
+- htdemucs_6s: Demucs is MIT and permits redistribution, but neither its LICENSE nor README says anything about the *weights* as distinct from code; upstream calls htdemucs_6s experimental. Recorded in THIRD-PARTY-NOTICES.md.
+- **OPEN: the source-offer contact in `COPYRIGHT` is a placeholder (`CONTACT-NOT-YET-SET`).** Must be a real address before the binary goes to anyone else, OR make the repo public (satisfies GPLv3 6(d) and drops the 3-year obligation).
 
 ## Resolved (ISSUE-006/008, B1, schema v10)
 - **B1 — `save_segments` not transactional.** RESOLVED: wrapped in transaction; `EditorState.save()` uses atomic `apply_edits()`.

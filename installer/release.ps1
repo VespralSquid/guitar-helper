@@ -12,7 +12,8 @@
 param(
     [switch]$SkipBuild,
     [string]$Notes = "",
-    [string]$MinUpgradableFrom = ""
+    [string]$MinUpgradableFrom = "",
+    [string]$SourceUrl = "https://github.com/VespralSquid/guitar-helper"
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,11 +49,15 @@ if (-not (Test-Path $setup)) { throw "Expected installer at $setup" }
 $hash = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
 $size = (Get-Item $setup).Length
 
+# source_url is not optional in practice: GPLv3 section 6 obliges us to tell
+# every recipient of a binary where its corresponding source is, and an update
+# conveys a binary just as the first install does.
 $manifest = [ordered]@{
-    version = $version
-    url     = "https://github.com/VespralSquid/guitar-helper/releases/download/v$version/GuitarHelper-Setup-$version.exe"
-    sha256  = $hash
-    notes   = $Notes
+    version    = $version
+    url        = "https://github.com/VespralSquid/guitar-helper/releases/download/v$version/GuitarHelper-Setup-$version.exe"
+    sha256     = $hash
+    notes      = $Notes
+    source_url = $SourceUrl
 }
 if ($MinUpgradableFrom) { $manifest.min_upgradable_from = $MinUpgradableFrom }
 

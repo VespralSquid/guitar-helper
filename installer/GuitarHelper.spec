@@ -85,6 +85,9 @@ datas = [
     # MIT/BSD/ISC all require their notices to be preserved in a
     # redistribution, and this bundle is one.
     (str(ROOT / "THIRD-PARTY-NOTICES.md"), "."),
+    # GPLv3 5(d): the About dialog links these, so they have to be resolvable
+    # through resource_path() from inside the bundle.
+    (str(ROOT / "COPYRIGHT"), "."),
 ]
 datas += [(str(_MODEL_DIR / f), "models") for f in _MODEL_FILES]
 

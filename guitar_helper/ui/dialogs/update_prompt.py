@@ -44,6 +44,24 @@ class UpdatePromptDialog(QDialog):
         self.notes.setPlainText(manifest.notes or "No release notes were provided.")
         self.notes.setMaximumHeight(140)
 
+        # GPLv3 section 6: an update conveys a binary, so the recipient has to be
+        # told where its source is at that moment — not only when they first
+        # installed. Always shown, so its absence from a manifest is visible.
+        self.source_label = QLabel()
+        self.source_label.setWordWrap(True)
+        self.source_label.setOpenExternalLinks(True)
+        if manifest.source_url:
+            self.source_label.setText(
+                "This update is free software under the GPL v3. "
+                f'Source: <a href="{manifest.source_url}">{manifest.source_url}</a>'
+            )
+        else:
+            self.source_label.setText(
+                "This update is free software under the GPL v3. The manifest did "
+                "not name a source location; see the COPYRIGHT file installed with "
+                "the application."
+            )
+
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -64,6 +82,7 @@ class UpdatePromptDialog(QDialog):
         layout.addWidget(self.headline)
         layout.addWidget(QLabel("What's new:"))
         layout.addWidget(self.notes)
+        layout.addWidget(self.source_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status)
         layout.addWidget(self.buttons)

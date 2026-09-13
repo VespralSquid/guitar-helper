@@ -148,6 +148,12 @@ installer/          — build system (NOT `packaging/`: that name shadows the Py
 - **ffmpeg is a user prerequisite, not bundled.** `check_ffmpeg()` is a BLOCK: audio-separator's
   `Separator.__init__` raises without it, so nothing can be analysed at all.
 - An Inno `[Code]` line may not begin with `#` — ISPP reads it as a preprocessor directive.
+- **The project is GPL-3.0-or-later** (since 2026-09-13), forced by bundling mutagen
+  (GPL-2.0-or-later). GPLv2 is not available: `requests` is Apache-2.0 and PySide6 offers
+  no LGPL-2.1. `LICENSE` must stay the verbatim GPL-3.0 text; see `COPYRIGHT`.
+- Anything that conveys a binary must carry the source offer: the installer shows the
+  licence, and the update manifest carries `source_url`. `--selftest` fails if the legal
+  files are missing from a bundle.
 
 Full as-built map, design decisions and threading model: `docs/architecture/ARCHITECTURE.md`.
 

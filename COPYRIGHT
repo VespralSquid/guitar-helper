@@ -1,0 +1,54 @@
+Guitar Helper — offline guitar performance assistant
+Copyright (C) 2026 Aryan Kumar
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see <https://www.gnu.org/licenses/>.
+
+The full licence text is in the file LICENSE, and is installed alongside the
+application.
+
+
+WHY GPL-3.0-OR-LATER SPECIFICALLY
+---------------------------------
+
+The version is forced by what the binary bundles, not by preference:
+
+  * mutagen is GPL-2.0-or-later. It is copyleft, so the combined distributed
+    work must be licensed under the GPL. "or-later" is what permits taking it
+    under version 3.
+  * requests is Apache-2.0, which is incompatible with GPLv2 but compatible
+    with GPLv3.
+  * PySide6 is offered as LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only. There
+    is no LGPL-2.1 option, so a GPLv2 combination is not available either.
+
+GPLv2 is therefore not a usable option for this distribution. GPL-3.0-or-later
+is.
+
+See THIRD-PARTY-NOTICES.md for the full component list.
+
+
+OBTAINING THE SOURCE CODE
+-------------------------
+
+GPLv3 section 6 requires that anyone who receives this program in binary form
+can also obtain its complete corresponding source.
+
+  Source repository:  https://github.com/VespralSquid/guitar-helper
+
+The repository is public, which satisfies section 6(d): the corresponding source
+is available from that network server, free of charge, to everyone who receives
+the binary. Each release is tagged, so the source corresponding to a given build
+is the tag matching its version.
+
+No separate written offer is therefore made, or needed. If the repository ever
+stops being publicly reachable, one of the other section 6 routes has to replace
+it before any further binary is distributed.

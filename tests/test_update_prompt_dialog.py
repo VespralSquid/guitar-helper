@@ -135,3 +135,25 @@ def test_too_old_to_upgrade_in_place_blocks_the_button(qtbot):
 
     assert not dialog.action_button.isEnabled()
     assert "99.0.0" in dialog.status.text()
+
+
+# --- GPL source offer shown at the moment a binary is conveyed ----------------
+
+
+def test_source_url_is_shown_as_a_link(qtbot):
+    dialog = _dialog(qtbot, _manifest(source_url="https://example.invalid/src"))
+
+    text = dialog.source_label.text()
+    assert "https://example.invalid/src" in text
+    assert "GPL" in text
+    assert dialog.source_label.openExternalLinks() is True
+
+
+def test_missing_source_url_still_states_the_licence(qtbot):
+    # Silence would be the wrong failure mode: the recipient must always be told
+    # the terms, even when the manifest omits where the source lives.
+    dialog = _dialog(qtbot)
+
+    text = dialog.source_label.text()
+    assert "GPL" in text
+    assert "COPYRIGHT" in text

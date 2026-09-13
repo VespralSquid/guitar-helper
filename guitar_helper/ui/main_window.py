@@ -606,13 +606,39 @@ class MainWindow(QMainWindow):
         )
 
     def _on_about(self) -> None:
-        QMessageBox.about(
-            self, "About Guitar Helper",
-            f"Guitar Helper {guitar_helper.__version__} — offline guitar performance "
-            "assistant.\n\n"
-            "Analyses local audio, segments it by guitar tone, and fires MIDI "
-            "Program Changes at tone boundaries during playback.",
+        """GPLv3 section 5(d): an interactive interface must display Appropriate
+        Legal Notices - copyright, no-warranty, redistribution rights, and how to
+        view the licence. This dialog is where that lives."""
+        def _link(name: str, label: str) -> str:
+            url = QUrl.fromLocalFile(str(resource_path(name))).toString()
+            return f'<a href="{url}">{label}</a>'
+
+        box = QMessageBox(self)
+        box.setWindowTitle("About Guitar Helper")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
+            f"<b>Guitar Helper {guitar_helper.__version__}</b><br>"
+            "Offline guitar performance assistant."
         )
+        box.setInformativeText(
+            "Analyses local audio, segments it by guitar tone, and fires MIDI "
+            "Program Changes at tone boundaries during playback."
+            "<br><br>Copyright &copy; 2026 Aryan Kumar<br><br>"
+            "This program is free software: you can redistribute it and/or modify "
+            "it under the terms of the GNU General Public License as published by "
+            "the Free Software Foundation, either version 3 of the License, or (at "
+            "your option) any later version."
+            "<br><br>This program comes with <b>ABSOLUTELY NO WARRANTY</b>; without "
+            "even the implied warranty of MERCHANTABILITY or FITNESS FOR A "
+            "PARTICULAR PURPOSE. See the GNU General Public License for more details."
+            "<br><br>"
+            + _link("LICENSE", "Full licence")
+            + " &middot; "
+            + _link("COPYRIGHT", "How to get the source")
+            + " &middot; "
+            + _link("THIRD-PARTY-NOTICES.md", "Third-party notices")
+        )
+        box.exec()
 
     # ------------------------------------------------------------------
     # updates

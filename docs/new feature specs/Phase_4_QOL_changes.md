@@ -19,9 +19,3 @@
     - add ability to select multiple segments for manipulation; ctrl selecting or shift selecting
     - refresh button; as of now, when changes are made to the analysis, the song has to be reloaded by switching to a different song and back again before the changes can be tested. I'd like to be able to skip that process and either reload the song on save so the changes are immediately acted on by the software, or a manual reload button so the changes can be tested by users. 
 
-## UX
-    - add help tab to redirect to repo or documentation(to be created later, such as README and other helpful docs)
-    - add right click menus to playlist content window with options to add songs, either from file or from a different playlist
-    - Add preferences tab to top bar to allow configuration of playback settings, such as an option to count into songs by a user selected number of bars or the ability to hear a click track
-
-##

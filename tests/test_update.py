@@ -318,3 +318,26 @@ def test_update_package_is_qt_free():
     source = Path(pkg.__file__).parent
     for module in source.glob("*.py"):
         assert "PySide6" not in module.read_text(encoding="utf-8"), module.name
+
+
+# --- GPL source offer travels with the manifest ------------------------------
+
+
+def test_source_url_is_parsed():
+    m = parse_manifest(_doc(source_url="https://example.invalid/src"))
+    assert m.source_url == "https://example.invalid/src"
+
+
+def test_source_url_is_optional():
+    assert parse_manifest(_doc()).source_url is None
+
+
+def test_blank_source_url_is_none_not_empty_string():
+    assert parse_manifest(_doc(source_url="")).source_url is None
+
+
+def test_source_url_must_be_https():
+    # A source offer pointing at a downgradeable URL is not much of an offer.
+    with pytest.raises(UpdateError) as excinfo:
+        parse_manifest(_doc(source_url="http://example.invalid/src"))
+    assert "https" in str(excinfo.value)

@@ -39,6 +39,11 @@ OutputBaseFilename=GuitarHelper-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; GPLv3: the licence must accompany the binary. Showing it in the wizard and
+; installing LICENSE/COPYRIGHT/THIRD-PARTY-NOTICES alongside the app is how
+; that obligation is met.
+LicenseFile=..\LICENSE
+InfoBeforeFile=..\COPYRIGHT
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
 ; The updater launches this with /SILENT; CLOSEAPPLICATIONS lets it replace an
@@ -54,10 +59,16 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "..\dist\GuitarHelper\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Also at the top level, not only inside _internal: a licence the recipient
+; cannot find has not really accompanied the program.
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\COPYRIGHT"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+Name: "{group}\Licence and source"; Filename: "{app}\COPYRIGHT"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
@@ -149,7 +160,15 @@ begin
     'SEPARATE PREREQUISITE - FFmpeg' + #13#10 +
     '  Not bundled, and required before any song can be analysed.' + #13#10 +
     '  Install it with:  winget install --id Gyan.FFmpeg -e' + #13#10 +
-    '  Guitar Helper will tell you if it is missing.';
+    '  Guitar Helper will tell you if it is missing.' + #13#10 +
+    '' + #13#10 +
+    'LICENCE' + #13#10 +
+    '  Guitar Helper is free software under the GNU General Public License' + #13#10 +
+    '  version 3 or later, and comes with ABSOLUTELY NO WARRANTY.' + #13#10 +
+    '  It bundles mutagen (GPL-2.0-or-later) and Qt (LGPL v3); the full' + #13#10 +
+    '  component list is installed as THIRD-PARTY-NOTICES.md.' + #13#10 +
+    '  You have the right to obtain the complete source code - see the' + #13#10 +
+    '  COPYRIGHT file, installed alongside the application.';
 
   FfmpegWarning := TNewStaticText.Create(ComponentsPage);
   FfmpegWarning.Parent := ComponentsPage.Surface;

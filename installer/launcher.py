@@ -121,6 +121,17 @@ def _selftest() -> int:
     bundled = resource_path("archetypes.json")
     print(f"bundled archetypes: {bundled} exists={bundled.exists()}")
 
+    # GPLv3: the licence, the copyright/source notice and the third-party
+    # notices must accompany the binary, and the About dialog links all three.
+    # A build that silently drops them is a compliance failure, not cosmetic.
+    for name in ("LICENSE", "COPYRIGHT", "THIRD-PARTY-NOTICES.md"):
+        path = resource_path(name)
+        if path.is_file():
+            print(f"ok    legal: {name}")
+        else:
+            print(f"FAIL  legal: {name} missing from the bundle ({path})")
+            failures.append((f"legal:{name}", None))
+
     if not _selftest_extract():
         failures.append(("feature extraction", None))
 

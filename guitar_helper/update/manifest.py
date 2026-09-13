@@ -60,6 +60,10 @@ class UpdateManifest:
     sha256: str
     notes: str = ""
     min_upgradable_from: str | None = None
+    # GPLv3 section 6: conveying a binary obliges us to tell the recipient how to
+    # get the corresponding source. An update conveys a binary, so the offer has
+    # to travel with the manifest rather than only with the first install.
+    source_url: str | None = None
 
     def is_newer_than(self, current: str) -> bool:
         return is_newer(self.version, current)
@@ -105,12 +109,19 @@ def parse_manifest(data: object) -> UpdateManifest:
         minimum = str(minimum).strip()
         parse_version(minimum)
 
+    source = data.get("source_url")
+    if source:
+        source = _require_https(source, "manifest source url")
+    else:
+        source = None
+
     return UpdateManifest(
         version=version,
         url=_require_https(data["url"], "manifest download url"),
         sha256=digest,
         notes=str(data.get("notes") or ""),
         min_upgradable_from=minimum,
+        source_url=source,
     )
 
 
