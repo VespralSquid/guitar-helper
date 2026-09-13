@@ -148,6 +148,10 @@ installer/          — build system (NOT `packaging/`: that name shadows the Py
 - **ffmpeg is a user prerequisite, not bundled.** `check_ffmpeg()` is a BLOCK: audio-separator's
   `Separator.__init__` raises without it, so nothing can be analysed at all.
 - An Inno `[Code]` line may not begin with `#` — ISPP reads it as a preprocessor directive.
+- **Build output goes outside OneDrive** (`%LOCALAPPDATA%\GuitarHelperBuild`). Building into the
+  repo makes OneDrive re-sync 847 MB per build and can fail it with `WinError 5`.
+- **The published manifest must never carry a UTF-8 BOM.** `json.loads` rejects one, and the
+  shipped 1.0.0 client decodes strict utf-8, so a BOM makes updates invisible to it.
 - **The project is GPL-3.0-or-later** (since 2026-09-13), forced by bundling mutagen
   (GPL-2.0-or-later). GPLv2 is not available: `requests` is Apache-2.0 and PySide6 offers
   no LGPL-2.1. `LICENSE` must stay the verbatim GPL-3.0 text; see `COPYRIGHT`.

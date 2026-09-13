@@ -341,3 +341,18 @@ def test_source_url_must_be_https():
     with pytest.raises(UpdateError) as excinfo:
         parse_manifest(_doc(source_url="http://example.invalid/src"))
     assert "https" in str(excinfo.value)
+
+
+def test_fetch_manifest_tolerates_a_utf8_bom(monkeypatch):
+    """PowerShell's Out-File -Encoding utf8 writes a BOM, so the manifest this
+    project publishes has one. A plain utf-8 decode rejects it and every live
+    update check failed - silently, because a failed check is quiet by design."""
+    payload = b"\xef\xbb\xbf" + json.dumps(_doc()).encode("utf-8")
+    _patch_get(monkeypatch, _FakeResponse(payload))
+
+    assert manifest_mod.fetch_manifest("https://example.invalid/m.json").version == "1.0.1"
+
+
+def test_fetch_manifest_still_parses_without_a_bom(monkeypatch):
+    _patch_get(monkeypatch, _FakeResponse(json.dumps(_doc()).encode("utf-8")))
+    assert manifest_mod.fetch_manifest("https://example.invalid/m.json").version == "1.0.1"

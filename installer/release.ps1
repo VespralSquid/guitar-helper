@@ -67,7 +67,11 @@ $manifest = [ordered]@{
 if ($MinUpgradableFrom) { $manifest.min_upgradable_from = $MinUpgradableFrom }
 
 $manifestPath = Join-Path $distPath "manifest.json"
-$manifest | ConvertTo-Json -Depth 3 | Out-File -FilePath $manifestPath -Encoding utf8
+# No BOM: Out-File -Encoding utf8 emits one, and a BOM in served JSON
+# breaks strict parsers. The client tolerates it now, but older clients
+# in the wild do not, so do not put one there in the first place.
+$json = $manifest | ConvertTo-Json -Depth 3
+[System.IO.File]::WriteAllText($manifestPath, $json, (New-Object System.Text.UTF8Encoding $false))
 
 # Fail here rather than shipping a manifest the client will reject.
 & $python -c @"

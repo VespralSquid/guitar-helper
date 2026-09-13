@@ -144,7 +144,12 @@ def fetch_manifest(url: str | None = None, *, timeout: float = 10.0) -> UpdateMa
     import json  # noqa: PLC0415
 
     try:
-        document = json.loads(body.decode("utf-8"))
+        # utf-8-sig, not utf-8: a BOM is legal in a served UTF-8 document and
+        # json.loads rejects it outright. PowerShell's Out-File -Encoding utf8
+        # writes one, so the manifest this project publishes has one, and a
+        # plain utf-8 decode made every live update check fail - silently,
+        # because a failed check is deliberately quiet. Be liberal here.
+        document = json.loads(body.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UpdateError(f"manifest is not valid JSON: {exc}") from exc
 

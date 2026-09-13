@@ -41,7 +41,9 @@ Spec + as-built record: **`docs/new feature specs/Packaging_and_Update_Strategy.
 ## MVP blockers (remaining)
 - **ffmpeg is a user prerequisite (decided 2026-08-26, not a blocker any more).** Installer documents it; preflight blocks with the winget command. Revisit by shipping a static LGPL ffmpeg if it proves a support burden.
 - **Unsigned installer** — SmartScreen warns on first run. Cost/reputation decision, deferred.
-- Update flow never exercised against a real GitHub release; unit-tested with a faked transport only.
+- **Update flow VERIFIED live against the v1.0.0 release** (2026-09-13): /latest/download/manifest.json returns 200 anonymously, parses, digest matches the artefact.
+- **BOM bug, found only by that live test.** `Out-File -Encoding utf8` writes a UTF-8 BOM; `json.loads` rejects a BOM outright, so every real update check failed - and failed SILENTLY, by design. Fixed both ends: `release.ps1` writes via `UTF8Encoding($false)`, and `fetch_manifest` decodes `utf-8-sig`. **The shipped 1.0.0 binary still has the strict utf-8 decode, so any future manifest MUST be BOM-free or 1.0.0 clients cannot see the update.**
+- GitHub's CDN caches release asset URLs: after re-uploading an asset the versioned URL served the stale copy for a while, while the `/latest/` alias (what DEFAULT_MANIFEST_URL uses) updated promptly.
 
 ## Gate 3 (ISSUE-007) — RESOLVED
 GUI ingestion path built end-to-end: `AnalysisWorker` (QThread), progress dialogs, Home "Add songs…" button + playlist right-click, File menu entry. `delete_track` on `ITrackEditor` role (mixed into `IAppStore`, not `ISegmentStore`); Home right-click "Remove from library" warns with corrected-segment count, caches stem (D5).
@@ -118,7 +120,8 @@ README.md, user-guide.md, Help menu entry.
 - `python-rtmidi`: no cp314 wheel -> meson source build; runtime-only, not in CI. **Resolved by freezing** — the bundle ships the compiled `.pyd`, so end users need no MSVC.
 - Build toolchain: `requirements-packaging.txt` (pyinstaller) + `winget install --id JRSoftware.InnoSetup -e`.
 - `ruff.toml` target-version=py312 (py314 bump deferred). CI: windows-latest, py3.14, ruff + pytest.
-- **The repo is inside OneDrive.** `stems/` (400 MB) syncs pointlessly, and Files On-Demand can dehydrate a stem so it `exists()` with the right size but needs a network fetch. Move the dev stems dir out. Volume is 95% full (54 GB free).
+- **The repo is inside OneDrive.** `stems/` (400 MB) syncs pointlessly, and Files On-Demand can dehydrate a stem so it `exists()` with the right size but needs a network fetch. Volume is 95% full (54 GB free).
+- **Build output now lives OUTSIDE OneDrive** at `%LOCALAPPDATA%\GuitarHelperBuild` (override: `-BuildRoot` / `GUITAR_HELPER_BUILD_ROOT`; the .iss takes a `DistDir` define). Building into the repo made OneDrive re-upload and re-delete 847 MB per build, prompted the user about mass deletions, and **failed a build outright** - OneDrive held a handle on audio_separator's `modelparams` dir and PyInstaller got `WinError 5`.
 - Measured: analysis of a 189s track = 10.7s with the stem cached; separation itself is minutes and dominates. The `_stack_raw` duplication is 0.77s of that (7%) — NOT the "~2x" an earlier draft claimed.
 
 ## Deferred / out of MVP scope
