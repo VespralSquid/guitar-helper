@@ -13,6 +13,13 @@
   #define AppVersion "1.0.0"
 #endif
 
+; Where build.ps1 put the frozen tree. Defaults to the in-repo dist for a
+; hand-run compile, but the build scripts pass it explicitly because the
+; real output lives outside OneDrive.
+#ifndef DistDir
+  #define DistDir "..\dist"
+#endif
+
 #define AppName "Guitar Helper"
 #define AppExeName "GuitarHelper.exe"
 #define AppPublisher "Aryan Kumar"
@@ -34,7 +41,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\dist
+OutputDir={#DistDir}
 OutputBaseFilename=GuitarHelper-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -58,7 +65,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\dist\GuitarHelper\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#DistDir}\GuitarHelper\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Also at the top level, not only inside _internal: a licence the recipient
 ; cannot find has not really accompanied the program.
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

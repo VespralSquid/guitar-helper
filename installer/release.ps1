@@ -13,13 +13,18 @@ param(
     [switch]$SkipBuild,
     [string]$Notes = "",
     [string]$MinUpgradableFrom = "",
-    [string]$SourceUrl = "https://github.com/VespralSquid/guitar-helper"
+    [string]$SourceUrl = "https://github.com/VespralSquid/guitar-helper",
+    [string]$BuildRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+if (-not $BuildRoot) { $BuildRoot = $env:GUITAR_HELPER_BUILD_ROOT }
+if (-not $BuildRoot) { $BuildRoot = Join-Path $env:LOCALAPPDATA "GuitarHelperBuild" }
+$distPath = Join-Path $BuildRoot "dist"
 
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "No venv at $python" }
@@ -31,7 +36,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {
 Write-Host "Releasing Guitar Helper $version" -ForegroundColor Cyan
 
 if (-not $SkipBuild) {
-    & (Join-Path $PSScriptRoot "build.ps1") -Clean
+    & (Join-Path $PSScriptRoot "build.ps1") -Clean -BuildRoot $BuildRoot
     if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
 }
 
@@ -40,10 +45,10 @@ if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISC
 if (-not (Test-Path $iscc)) { throw "ISCC.exe not found. winget install JRSoftware.InnoSetup" }
 
 Write-Host "Compiling installer..." -ForegroundColor Cyan
-& $iscc "/DAppVersion=$version" (Join-Path $PSScriptRoot "GuitarHelper.iss") | Out-Null
+& $iscc "/DAppVersion=$version" "/DDistDir=$distPath" (Join-Path $PSScriptRoot "GuitarHelper.iss") | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 
-$setup = Join-Path $root "dist\GuitarHelper-Setup-$version.exe"
+$setup = Join-Path $distPath "GuitarHelper-Setup-$version.exe"
 if (-not (Test-Path $setup)) { throw "Expected installer at $setup" }
 
 $hash = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
@@ -61,7 +66,7 @@ $manifest = [ordered]@{
 }
 if ($MinUpgradableFrom) { $manifest.min_upgradable_from = $MinUpgradableFrom }
 
-$manifestPath = Join-Path $root "dist\manifest.json"
+$manifestPath = Join-Path $distPath "manifest.json"
 $manifest | ConvertTo-Json -Depth 3 | Out-File -FilePath $manifestPath -Encoding utf8
 
 # Fail here rather than shipping a manifest the client will reject.
